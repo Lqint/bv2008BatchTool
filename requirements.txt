@@ -1,0 +1,4 @@
+gmssl>=3.2.2
+requests>=2.28
+qrcode>=7.0
+xlrd>=2.0
