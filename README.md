@@ -66,6 +66,21 @@ python3 bv_record_hours.py <uid> <YYYY-MM-DD> <小时数> [证明图路径]
 python3 bv_record_hours.py 90873434 2026-05-02 8
 ```
 
+### 给已招募志愿者录入统一时数
+
+不依赖姓名/XLS，直接从 `findRecruitVolunteerList` 拉岗位现有成员，批量赋予相同时数。成员已在岗，无需 addList。
+
+```bash
+# 预览名单（不提交）
+python3 bv_hours_for_roster.py --hours 3 --start 2026-05-01 --dry-run
+
+# 全员提交
+python3 bv_hours_for_roster.py --hours 3 --start 2026-05-01
+
+# 只提交指定 uid
+python3 bv_hours_for_roster.py --hours 3 --start 2026-05-01 --filter-uid 90873434 234222082
+```
+
 ### 从 Excel 批量录入时数
 
 ```bash
@@ -145,7 +160,8 @@ encrypted = "04" + SM2.encrypt(plaintext, pk, mode=1)
 ├── bv_client.py        # 通用网关客户端
 ├── bv_import.py        # 批量添加成员
 ├── bv_record_hours.py  # 单人时数录入
-├── bv_batch_from_xls.py# Excel 批量时数录入
+├── bv_batch_from_xls.py# Excel 批量时数录入（按姓名搜索）
+├── bv_hours_for_roster.py # 已招募成员批量时数（直接拉名单）
 ├── requirements.txt
 └── .gitignore
 ```
