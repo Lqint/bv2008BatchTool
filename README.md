@@ -73,10 +73,13 @@ addMember（加入团体）
 ### 批量添加成员
 
 ```bash
-# 从文件（一行一个姓名）
-python3 bv_import.py names.txt
+# 从文件（每行: 姓名,身份证号；也兼容一行一个姓名）
+python3 bv_import.py names.example.txt
 
-# 命令行
+# 单人：姓名 + 身份证号共同匹配
+python3 bv_import.py --cert-no 110101199001011234 张三
+
+# 命令行只传姓名时仍可用，但重名时不如证件号精确
 python3 bv_import.py 张三 李四 王五
 ```
 
@@ -114,7 +117,7 @@ python3 bv_batch_from_xls.py roster.xls --dry-run
 python3 bv_batch_from_xls.py roster.xls --start 2026-05-01 --max-hours 8
 ```
 
-Excel 格式要求：第一行表头含 `学生姓名` 和 `认定时(次)数` 列。
+Excel 格式要求：第一行表头含 `学生姓名` 和 `认定时(次)数` 列。若同时含 `身份证号`、`身份证号码`、`证件号` 或 `证件号码` 列，脚本会用姓名 + 证件号共同查询 uid。
 
 ---
 
@@ -158,7 +161,7 @@ encrypted = "04" + SM2.encrypt(plaintext, pk, mode=1)
 |---|---|---|
 | `getInSm2Key` | zybjfront | 取加密公钥 |
 | `addMember` | zybjfront | 按加密姓名和证件号加入团体成员池 |
-| `activityUser-findOrgUserList` | zybjfront | 按加密姓名查 uid |
+| `activityUser-findOrgUserList` | zybjfront | 按加密姓名查 uid；有证件号时同时传加密 `certNo` |
 | `activityUser-addList` | zybjfront | 批量加入岗位 |
 | `zybj_uploadFile` | **zybjuser** | 上传证明图，返回 newName |
 | `activityTiming-batchAdd` | zybjfront | 录入时数 |
@@ -170,7 +173,7 @@ encrypted = "04" + SM2.encrypt(plaintext, pk, mode=1)
 - **filePath 单次使用**：同一个 `zybj_uploadFile` 返回的 `newName` 只能用于一次 `batchAdd`，复用会报 `附件上传失败 (6203)`
 - **accessToken 有效期约 1 小时**，过期重新 `bv_login.py`
 - **inSm2Key 公钥每天轮换**，脚本每次运行自动拉取
-- **重名**：`findOrgUserList` 多条结果时取第一条并打印 warning，必要时用 certNo 二次确认
+- **重名**：优先提供身份证号/证件号，让 `findOrgUserList` 用姓名 + `certNo` 共同匹配；仍返回多条时脚本会取第一条并打印 warning
 - `config.py` 已在 `.gitignore` 中，不会上传 token
 
 ---

@@ -24,7 +24,7 @@ app_id, interface_id, version, header, biz_content, charset, timestamp, origin, 
 |---|---|---|
 | `getInSm2Key` | `zybjfront` | Returns the current public key for SM2 encryption. |
 | `addMember` | `zybjfront` | Adds a registered volunteer to the org member pool by encrypted `name` and `certNo`. Business success is `data.code == 200`; `50000` usually carries a useful `message`. |
-| `activityUser-findOrgUserList` | `zybjfront` | Searches org members by encrypted name and returns uid candidates. |
+| `activityUser-findOrgUserList` | `zybjfront` | Searches org members by encrypted name and, when available, encrypted `certNo`; returns uid candidates. |
 | `activityUser-addList` | `zybjfront` | Adds uid values to an activity post. Run this before recording hours. |
 | `zybj_uploadFile` | `zybjuser` | Uploads proof image and returns `newName`; the file path is single-use. |
 | `activityTiming-batchAdd` | `zybjfront` | Records service hours with uid, times, and uploaded proof file path. |
@@ -53,3 +53,21 @@ Observed response shape:
 ```
 
 When the person is not registered as a volunteer, the business code may be `50000` and the useful explanation is in `data.message`.
+
+## activityUser-findOrgUserList
+
+Request `biz_content` when matching by both name and certificate number:
+
+```json
+{
+  "pageNo": 1,
+  "pageSize": 10,
+  "name": "<SM2 encrypted name>",
+  "certNo": "<SM2 encrypted certificate number>",
+  "activityId": "<activity id>",
+  "postId": "<post id>",
+  "orgId": "<org id>"
+}
+```
+
+`certNo` is optional for backward compatibility, but providing it avoids picking the wrong volunteer when multiple people have the same name.

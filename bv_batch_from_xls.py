@@ -1,8 +1,9 @@
 """Batch-record hours from an XLS roster.
 
 Reads a roster file (.xls/.xlsx) with columns 学生姓名 and 认定时(次)数,
+optionally with 身份证号 / 证件号码,
 then for each person:
-  1. searches uid via findOrgUserList (SM2-encrypted name)
+  1. searches uid via findOrgUserList (SM2-encrypted name + certNo when present)
   2. ensures uid is in the post via addList  ← required, see note below
   3. allocates hours from START_DATE, max MAX_HOURS_PER_DAY per day (spill to next)
   4. uploads a proof image per batchAdd call (filePath is single-use)
@@ -36,19 +37,32 @@ except ImportError:
 NOTES = ""
 
 
-def parse_roster(path: Path) -> list[tuple[str, float]]:
+def cell_text(sh, row: int, col: int | None) -> str | None:
+    if col is None:
+        return None
+    value = sh.cell_value(row, col)
+    if sh.cell_type(row, col) == xlrd.XL_CELL_NUMBER and float(value).is_integer():
+        return str(int(value))
+    return str(value).strip()
+
+
+def parse_roster(path: Path) -> list[tuple[str, str | None, float]]:
     wb = xlrd.open_workbook(str(path))
     sh = wb.sheet_by_index(0)
-    header = sh.row_values(0)
+    header = [str(h).strip() for h in sh.row_values(0)]
     name_col = header.index("学生姓名")
+    cert_col = next(
+        (i for i, h in enumerate(header) if h in {"身份证号", "证件号码"}),
+        None,
+    )
     hour_col = next(i for i, h in enumerate(header) if "时" in str(h) and "数" in str(h))
     out = []
     for r in range(1, sh.nrows):
-        row = sh.row_values(r)
-        name = str(row[name_col]).strip()
-        hours = float(row[hour_col])
+        name = cell_text(sh, r, name_col) or ""
+        cert_no = cell_text(sh, r, cert_col)
+        hours = float(sh.cell_value(r, hour_col))
         if name and hours > 0:
-            out.append((name, hours))
+            out.append((name, cert_no, hours))
     return out
 
 
@@ -64,7 +78,7 @@ def allocate(hours: float, start: date, max_per_day: float) -> list[tuple[str, f
     return out
 
 
-def search_uid(name: str, pk: str) -> tuple[str | None, dict | None]:
+def search_uid(name: str, cert_no: str | None, pk: str) -> tuple[str | None, dict | None]:
     biz = {
         "pageNo": 1,
         "pageSize": 10,
@@ -73,12 +87,15 @@ def search_uid(name: str, pk: str) -> tuple[str | None, dict | None]:
         "postId": POST_ID,
         "orgId": ORG_ID,
     }
+    if cert_no:
+        biz["certNo"] = sm2_encrypt(cert_no, pk)
     data = unwrap(call("activityUser-findOrgUserList", biz, access_token=TOKEN))
     lst = data["resultData"]["dataList"]
     if not lst:
         return None, None
     if len(lst) > 1:
-        print(f"  [warn] {name}: {len(lst)} matches, using first ({lst[0]['nameSensitive']})")
+        extra = " + certNo" if cert_no else ""
+        print(f"  [warn] {name}{extra}: {len(lst)} matches, using first ({lst[0]['nameSensitive']})")
     u = lst[0]
     return u["uid"], u
 
@@ -117,8 +134,9 @@ def main() -> int:
     start = date.fromisoformat(args.start)
     roster = parse_roster(args.xls)
     print(f"[parse] {len(roster)} record(s) from {args.xls.name}")
-    for n, h in roster:
-        print(f"        {n}: {h}h")
+    for n, cert_no, h in roster:
+        cert_label = f" certNo={cert_no[:6]}****" if cert_no else ""
+        print(f"        {n}{cert_label}: {h}h")
 
     print(f"[fetch] inSm2Key public key")
     pk = get_in_sm2_pk(TOKEN)
@@ -127,15 +145,16 @@ def main() -> int:
     print(f"[search] resolve uids")
     resolved: list[tuple[str, str, str, list[tuple[str, float]]]] = []
     missing: list[str] = []
-    for name, hours in roster:
-        uid, u = search_uid(name, pk)
+    for name, cert_no, hours in roster:
+        uid, u = search_uid(name, cert_no, pk)
+        lookup = f"{name} + certNo={cert_no[:6]}****" if cert_no else name
         if not uid:
-            missing.append(name)
-            print(f"        ✗ {name} → no match")
+            missing.append(lookup)
+            print(f"        ✗ {lookup} → no match")
             continue
         plan = allocate(hours, start, args.max_hours)
         plan_str = ", ".join(f"{t}={h}h" for t, h in plan)
-        print(f"        ✓ {name} → uid={uid} ({u['nameSensitive']})  plan: {plan_str}")
+        print(f"        ✓ {lookup} → uid={uid} ({u['nameSensitive']})  plan: {plan_str}")
         resolved.append((name, uid, u["nameSensitive"], plan))
 
     if not resolved:
