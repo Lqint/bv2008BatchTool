@@ -50,7 +50,7 @@ def parse_hours(value) -> float:
     return hours
 
 
-def allocate_hours(hours: float, start: date, today: date | None = None, max_per_day: float = 8.0) -> list[tuple[str, float]]:
+def allocate_hours(hours: float, start: date, today: date | None = None, max_per_day: float = 10.0) -> list[tuple[str, float]]:
     today = today or date.today()
     if start > today:
         raise ValueError("起始日期晚于今天，无法录入")
@@ -122,9 +122,9 @@ def process_row(
         ok, message = api.add_member(name, cert_no)
         if not ok:
             return f"失败：加入团体失败：{message}"
-        user = api.find_org_user(name, cert_no, activity_id, post_id, org_id)
+        user = api.find_org_user(name, cert_no, activity_id, "1", org_id)
         if not user:
-            return "失败：加入团体后仍未查询到 uid"
+            return "失败：加入团体后使用通配符仍未查询到 uid"
 
     uid = str(user.get("uid", "")).strip()
     if not uid:
@@ -133,7 +133,8 @@ def process_row(
     try:
         api.add_to_post(activity_id, post_id, org_id, uid)
     except Exception as exc:
-        return f"失败：加入岗位失败 postId={post_id}：{exc}"
+        if "已经在此活动中" not in str(exc):
+            return f"失败：加入岗位失败 postId={post_id}：{exc}"
 
     file_path = api.upload_proof(proof_name, proof_bytes)
     result = api.record_hours(activity_id, post_id, org_id, uid, times, file_path)

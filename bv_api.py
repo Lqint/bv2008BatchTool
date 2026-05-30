@@ -181,20 +181,12 @@ class BVApi:
             "certNo": self.encrypt(cert_no),
         }
         inner = parse_gateway_data(self.call("addMember", biz))
-        data = inner.get("data", {})
-        if isinstance(data, str):
-            try:
-                data = json.loads(data)
-            except json.JSONDecodeError:
-                data = {"message": data}
-        if not isinstance(data, dict):
-            data = {}
 
-        code = str(data.get("code", ""))
-        message = data.get("message") or inner.get("message", "")
+        code = str(inner.get("code", ""))
+        message = str(inner.get("message", ""))
         if code == "200":
             return True, message or "success"
-        if code == "50000" and "该用户已加入团体" in message:
+        if code == "50000" and "已加入团体" in message:
             return True, message
         if code == "50000":
             return False, message or "添加的人尚未注册为志愿者"
