@@ -4,7 +4,7 @@ Usage:
     python3 bv_record_hours.py <uid> <YYYY-MM-DD> <hours> [proof_image_path]
 
 Example:
-    python3 bv_record_hours.py 90873434 2026-05-02 8 ./proof.png
+    python3 bv_record_hours.py 12345678 2026-05-02 8 ./proof.png
 
 Configure TOKEN / ACTIVITY_ID / POST_ID / ORG_ID in config.py first.
 """

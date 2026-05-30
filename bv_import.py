@@ -48,7 +48,7 @@ def load_entries(args: list[str]) -> list[tuple[str, str | None]]:
     return [(name, None) for name in args]
 
 
-def search_uid(name: str, cert_no: str | None, pk: str) -> tuple[str | None, dict | None]:
+def search_uid(name: str, cert_no: str | None, pk: str) -> tuple[str | None, dict | None, str | None]:
     biz = {
         "pageNo": 1,
         "pageSize": 10,
@@ -62,12 +62,12 @@ def search_uid(name: str, cert_no: str | None, pk: str) -> tuple[str | None, dic
     data = unwrap(call("activityUser-findOrgUserList", biz, access_token=TOKEN))
     lst = data["resultData"]["dataList"]
     if not lst:
-        return None, None
+        return None, None, None
     if len(lst) > 1:
         extra = " + certNo" if cert_no else ""
-        print(f"[warn] {name}{extra}: {len(lst)} matches, using first ({lst[0]['nameSensitive']})")
+        return None, None, f"{name}{extra}: {len(lst)} matches, skipped"
     u = lst[0]
-    return u["uid"], u
+    return u["uid"], u, None
 
 
 def add_batch(uids: list[str]) -> dict:
@@ -93,8 +93,12 @@ def main(argv: list[str]) -> int:
     found: list[tuple[str, str, str]] = []
     missing: list[str] = []
     for n, cert_no in entries:
-        uid, u = search_uid(n, cert_no, pk)
+        uid, u, warning = search_uid(n, cert_no, pk)
         lookup = f"{n} + certNo={cert_no[:6]}****" if cert_no else n
+        if warning:
+            missing.append(lookup)
+            print(f"      ⚠ {warning}")
+            continue
         if uid:
             found.append((n, uid, u["nameSensitive"]))
             print(f"      ✓ {lookup} → uid={uid} ({u['nameSensitive']}, userNumber={u['userNumber']})")

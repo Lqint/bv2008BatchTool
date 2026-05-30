@@ -70,7 +70,7 @@ def main(argv: list[str]) -> int:
     print(f"{len(posts)} post(s) found:")
     for post in posts:
         name = post.get("postName", "")
-        code = post.get("postCode", "")
+        code = post.get("iid") or post.get("postId") or post.get("postCode", "")
         print(f"  {name}\t{code}")
     return 0
 

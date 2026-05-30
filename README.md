@@ -43,9 +43,61 @@ python3 bv_login.py
 
 终端显示二维码，用支付宝/微信/百度 或 京通小程序扫码，确认后输出 token，粘贴进 `config.py`。
 
+### 4. 启动桌面界面
+
+```bash
+python bv_gui.py
+```
+
+桌面界面支持扫码登录或手动填入 TOKEN、按活动 ID 拉取岗位、上传 xlsx 表格和 png 证明材料，并把每行录入结果写回新的 xlsx 文件。
+
+给没有 Python 的同学使用时，可在 Windows 上打包：
+
+```powershell
+.\build_exe.ps1
+```
+
+生成文件位于 `dist\bv2008BatchTool\bv2008BatchTool.exe`。
+
 ---
 
 ## 功能脚本
+
+### 桌面批量录入（推荐）
+
+```bash
+python bv_gui.py
+```
+
+表格要求为 `.xlsx`，第一行表头必须包含：
+
+```text
+姓名、身份证号、岗位、时长
+```
+
+`身份证号` 单元格可留空。留空时只按姓名查询；若返回多名志愿者，脚本会跳过该行并在“录入结果”列提示补充身份证号。
+示例文件为`sample.xlsx`
+
+流程：
+
+```
+扫码或手动 TOKEN
+  → 输入活动 ID / 组织 ID，获取岗位列表
+  → 上传 xlsx 和可选 png 证明材料
+  → 选择起始日期
+  → 批量录入并输出带“录入结果”列的新 xlsx
+```
+
+每行会按顺序执行：
+
+```
+findOrgUserList（有身份证号时用姓名+身份证号；否则仅用姓名）
+  → 找不到则 addMember，再重新查询
+  → activityUser-addList 加入岗位
+  → 检查从起始日期到今天是否足够容纳时长（每天最多 8 小时）
+  → 上传证明图
+  → activityTiming-batchAdd 录入时数
+```
 
 ### 将志愿者加入团体成员池（addMember）
 
@@ -73,13 +125,13 @@ addMember（加入团体）
 ### 批量添加成员
 
 ```bash
-# 从文件（每行: 姓名,身份证号；也兼容一行一个姓名）
+# 从文件（每行: 姓名,身份证号；身份证号可空，也兼容一行一个姓名）
 python3 bv_import.py names.example.txt
 
 # 单人：姓名 + 身份证号共同匹配
 python3 bv_import.py --cert-no 110101199001011234 张三
 
-# 命令行只传姓名时仍可用，但重名时不如证件号精确
+# 命令行只传姓名时仍可用；若匹配到多人会跳过
 python3 bv_import.py 张三 李四 王五
 ```
 
@@ -92,7 +144,7 @@ python3 bv_import.py 张三 李四 王五
 python3 bv_find_posts.py
 
 # 或在命令行指定
-python3 bv_find_posts.py --activity-id 1510325811016630272 --org-id <orgId>
+python3 bv_find_posts.py --activity-id <activityId> --org-id <orgId>
 ```
 
 ### 录入单人时数
@@ -101,7 +153,7 @@ python3 bv_find_posts.py --activity-id 1510325811016630272 --org-id <orgId>
 python3 bv_record_hours.py <uid> <YYYY-MM-DD> <小时数> [证明图路径]
 
 # 示例（不带图：自动用 1x1 占位 PNG）
-python3 bv_record_hours.py 90873434 2026-05-02 8
+python3 bv_record_hours.py 12345678 2026-05-02 8
 ```
 
 ### 给已招募志愿者录入统一时数
@@ -116,7 +168,7 @@ python3 bv_hours_for_roster.py --hours 3 --start 2026-05-01 --dry-run
 python3 bv_hours_for_roster.py --hours 3 --start 2026-05-01
 
 # 只提交指定 uid
-python3 bv_hours_for_roster.py --hours 3 --start 2026-05-01 --filter-uid 90873434 234222082
+python3 bv_hours_for_roster.py --hours 3 --start 2026-05-01 --filter-uid 12345678 11111111
 ```
 
 ### 从 Excel 批量录入时数
@@ -174,7 +226,7 @@ encrypted = "04" + SM2.encrypt(plaintext, pk, mode=1)
 | `getInSm2Key` | zybjfront | 取加密公钥 |
 | `addMember` | zybjfront | 按加密姓名和证件号加入团体成员池 |
 | `findPostList` | zybjfront | 按 `activityId` 和 `orgId` 查询岗位名称与岗位 ID |
-| `activityUser-findOrgUserList` | zybjfront | 按加密姓名查 uid；有证件号时同时传加密 `certNo` |
+| `activityUser-findOrgUserList` | zybjfront | 按加密姓名查 uid；有证件号时同时传加密 `certNo`；返回多人时跳过 |
 | `activityUser-addList` | zybjfront | 批量加入岗位 |
 | `zybj_uploadFile` | **zybjuser** | 上传证明图，返回 newName |
 | `activityTiming-batchAdd` | zybjfront | 录入时数 |
@@ -186,7 +238,7 @@ encrypted = "04" + SM2.encrypt(plaintext, pk, mode=1)
 - **filePath 单次使用**：同一个 `zybj_uploadFile` 返回的 `newName` 只能用于一次 `batchAdd`，复用会报 `附件上传失败 (6203)`
 - **accessToken 有效期约 1 小时**，过期重新 `bv_login.py`
 - **inSm2Key 公钥每天轮换**，脚本每次运行自动拉取
-- **重名**：优先提供身份证号/证件号，让 `findOrgUserList` 用姓名 + `certNo` 共同匹配；仍返回多条时脚本会取第一条并打印 warning
+- **重名**：优先提供身份证号/证件号，让 `findOrgUserList` 用姓名 + `certNo` 共同匹配；仅按姓名查询且返回多条时会跳过该人
 - `config.py` 已在 `.gitignore` 中，不会上传 token
 
 ---
@@ -196,6 +248,9 @@ encrypted = "04" + SM2.encrypt(plaintext, pk, mode=1)
 ```
 ├── config.example.py   # 配置模板（复制为 config.py 后填写）
 ├── config.py           # 本地配置（gitignored）
+├── bv_gui.py           # 桌面 GUI：全流程批量录入
+├── bv_api.py           # API 封装：登录、查岗位、查人、入岗、录时数
+├── bv_batch_runner.py  # xlsx 批处理与结果写回
 ├── bv_login.py         # 扫码登录，获取 accessToken
 ├── bv_client.py        # 通用网关客户端
 ├── bv_import.py        # 批量添加成员
@@ -206,6 +261,7 @@ encrypted = "04" + SM2.encrypt(plaintext, pk, mode=1)
 ├── bv_hours_for_roster.py # 已招募成员批量时数（直接拉名单）
 ├── names.example.txt   # 姓名名单示例
 ├── api.md              # 接口抓包/逆向记录模板
+├── build_exe.ps1       # Windows 一键打包 exe
 ├── requirements.txt
 └── .gitignore
 ```
