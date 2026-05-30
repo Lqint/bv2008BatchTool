@@ -52,7 +52,7 @@ python3 bv_login.py
 搜不到某人时（`findOrgUserList` 返回空），说明他未在本团体注册。先用此脚本将其加入：
 
 ```bash
-python3 bv_add_org_member.py 施凯鑫 210221200601187519
+python3 bv_add_org_member.py name id_num
 
 # 批量（CSV，每行: 姓名,证件号）
 python3 bv_add_org_member.py --file members.csv
