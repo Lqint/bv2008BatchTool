@@ -2,7 +2,7 @@
 
 Usage:
     python3 bv_import.py names.txt
-    python3 bv_import.py 毕海欣 张三 李四
+    python3 bv_import.py 张三 李四
 
 Configure TOKEN / ACTIVITY_ID / POST_ID / ORG_ID in config.py first.
 """
