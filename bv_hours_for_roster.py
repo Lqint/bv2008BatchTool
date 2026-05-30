@@ -9,7 +9,7 @@ No addList step needed — they are already members.
 Usage:
     python3 bv_hours_for_roster.py --hours 3 --start 2026-05-01
     python3 bv_hours_for_roster.py --hours 8 --start 2026-05-01 --dry-run
-    python3 bv_hours_for_roster.py --hours 3 --start 2026-05-01 --filter-uid 90873434 234222082
+    python3 bv_hours_for_roster.py --hours 3 --start 2026-05-01 --filter-uid * *
 
 Configure TOKEN / ACTIVITY_ID / POST_ID / ORG_ID in config.py first.
 """
