@@ -33,9 +33,25 @@ def add_member(name: str, cert_no: str, pk: str) -> tuple[bool, str]:
     }
     raw = call("addMember", biz, access_token=TOKEN, app_id="zybjfront")
     inner = json.loads(raw["data"])
-    ok = inner.get("success", False)
-    msg = inner.get("message", "")
-    return ok, msg
+
+    data = inner.get("data", {})
+    if isinstance(data, str):
+        try:
+            data = json.loads(data)
+        except json.JSONDecodeError:
+            data = {"message": data}
+    if not isinstance(data, dict):
+        data = {}
+
+    code = str(data.get("code", ""))
+    msg = data.get("message") or inner.get("message", "")
+    if code == "200":
+        return True, msg or "success"
+    if code == "50000":
+        return False, msg or "添加失败"
+    if inner.get("success") is False:
+        return False, msg or f"gateway error: {inner.get('code')}"
+    return False, msg or f"unexpected code: {code or 'missing'}"
 
 
 def load_csv(path: Path) -> list[tuple[str, str]]:

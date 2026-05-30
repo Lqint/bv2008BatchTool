@@ -157,6 +157,7 @@ encrypted = "04" + SM2.encrypt(plaintext, pk, mode=1)
 | interface_id | app_id | 说明 |
 |---|---|---|
 | `getInSm2Key` | zybjfront | 取加密公钥 |
+| `addMember` | zybjfront | 按加密姓名和证件号加入团体成员池 |
 | `activityUser-findOrgUserList` | zybjfront | 按加密姓名查 uid |
 | `activityUser-addList` | zybjfront | 批量加入岗位 |
 | `zybj_uploadFile` | **zybjuser** | 上传证明图，返回 newName |
@@ -186,6 +187,8 @@ encrypted = "04" + SM2.encrypt(plaintext, pk, mode=1)
 ├── bv_record_hours.py  # 单人时数录入
 ├── bv_batch_from_xls.py# Excel 批量时数录入（按姓名搜索）
 ├── bv_hours_for_roster.py # 已招募成员批量时数（直接拉名单）
+├── names.example.txt   # 姓名名单示例
+├── api.md              # 接口抓包/逆向记录模板
 ├── requirements.txt
 └── .gitignore
 ```
