@@ -8,7 +8,7 @@ Error 50000 "添加的人尚未注册为志愿者" means the person has no bv200
 and must register on the platform before they can be added.
 
 Usage:
-    python3 bv_add_org_member.py 施凯鑫 210221200601187519
+    python3 bv_add_org_member.py name id_num
     python3 bv_add_org_member.py --file members.csv     # CSV: name,certNo per line
 
 Configure TOKEN in config.py first.
