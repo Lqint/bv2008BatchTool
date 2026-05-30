@@ -6,7 +6,12 @@ import json
 import time
 from dataclasses import dataclass
 
-from bv_client import call, sm2_encrypt
+import requests
+from gmssl import func, sm2, sm3
+
+GATEWAY = "https://test1.bv2008.cn/api-gateway/jpaas-jags-server/interface/gateway"
+APP_ID = "zybjfront"
+REQUEST_DELAY_SECONDS = 3
 
 TINY_PNG_B64 = (
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
@@ -26,6 +31,55 @@ class AmbiguousUserError(RuntimeError):
         super().__init__(f"姓名 {name} 匹配到 {count} 人，请补充身份证号后重试")
         self.name = name
         self.count = count
+
+
+def make_sign(form: dict) -> str:
+    raw = (
+        f"app_id={form['app_id']}&biz_content={form['biz_content']}"
+        f"&charset={form['charset']}&interface_id={form['interface_id']}"
+        f"&origin={form['origin']}&timestamp={form['timestamp']}"
+        f"&version={form['version']}"
+    )
+    return sm3.sm3_hash(func.bytes_to_list(raw.encode("utf-8")))
+
+
+def sm2_encrypt(plaintext: str, pub_hex: str) -> str:
+    pk = pub_hex[2:] if pub_hex.startswith("04") and len(pub_hex) == 130 else pub_hex
+    crypter = sm2.CryptSM2(public_key=pk, private_key="", mode=1)
+    enc = crypter.encrypt(plaintext.encode("utf-8"))
+    return "04" + enc.hex()
+
+
+def call_gateway(
+    interface_id: str,
+    biz: dict,
+    access_token: str | None = None,
+    app_id: str = APP_ID,
+    file: tuple | None = None,
+) -> dict:
+    header = {"accessSource": "pc"}
+    if access_token:
+        header["accessToken"] = access_token
+    form = {
+        "app_id": app_id,
+        "interface_id": interface_id,
+        "version": "1.0",
+        "header": json.dumps(header, separators=(",", ":")),
+        "biz_content": json.dumps(biz, separators=(",", ":"), ensure_ascii=False),
+        "charset": "utf8",
+        "timestamp": str(int(time.time() * 1000)),
+        "origin": "1",
+    }
+    form["sign"] = make_sign(form)
+    files = {k: (None, v) for k, v in form.items()}
+    if file is not None:
+        files["file"] = file
+    try:
+        response = requests.post(GATEWAY, files=files, timeout=60)
+        response.raise_for_status()
+        return response.json()
+    finally:
+        time.sleep(REQUEST_DELAY_SECONDS)
 
 
 def parse_gateway_data(resp: dict) -> dict:
@@ -61,7 +115,7 @@ class BVApi:
         self._pk = None
 
     def call(self, interface_id: str, biz: dict, app_id: str = "zybjfront", file: tuple | None = None) -> dict:
-        return call(interface_id, biz, access_token=self.token, app_id=app_id, file=file)
+        return call_gateway(interface_id, biz, access_token=self.token, app_id=app_id, file=file)
 
     def get_pk(self) -> str:
         if self._pk is None:
@@ -72,12 +126,12 @@ class BVApi:
         return sm2_encrypt(value, self.get_pk())
 
     def create_login_qr(self) -> tuple[str, str]:
-        data = unwrap_success(call("createCityCode", {}, app_id="zybjuser"))
+        data = unwrap_success(call_gateway("createCityCode", {}, app_id="zybjuser"))
         rd = data["resultData"]
         return rd["codeId"], rd["codeData"]["codeContent"]
 
     def check_login_status(self, code_id: str) -> tuple[str, str | None]:
-        data = unwrap_success(call("checkCodeStatus", {"codeId": code_id}, app_id="zybjuser"))
+        data = unwrap_success(call_gateway("checkCodeStatus", {"codeId": code_id}, app_id="zybjuser"))
         rd = data["resultData"]
         status = str(rd.get("status", ""))
         token = None
@@ -140,6 +194,8 @@ class BVApi:
         message = data.get("message") or inner.get("message", "")
         if code == "200":
             return True, message or "success"
+        if code == "50000" and "该用户已加入团体" in message:
+            return True, message
         if code == "50000":
             return False, message or "添加的人尚未注册为志愿者"
         if inner.get("success") is False:

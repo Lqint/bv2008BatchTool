@@ -25,7 +25,7 @@ class BatchConfig:
     proof_bytes: bytes | None = None
 
 
-REQUIRED_HEADERS = ["姓名", "身份证号", "岗位", "时长"]
+REQUIRED_HEADERS = ["姓名", "身份证号（选填）", "岗位", "时长"]
 RESULT_HEADER = "录入结果"
 
 
@@ -155,7 +155,7 @@ def run_batch(config: BatchConfig, posts: list[PostInfo], progress: ProgressCall
 
     for row in range(2, ws.max_row + 1):
         name = normalize_text(ws.cell(row=row, column=index["姓名"]).value)
-        cert_no = normalize_text(ws.cell(row=row, column=index["身份证号"]).value)
+        cert_no = normalize_text(ws.cell(row=row, column=index["身份证号（选填）"]).value)
         post_name = normalize_text(ws.cell(row=row, column=index["岗位"]).value)
         try:
             hours = parse_hours(ws.cell(row=row, column=index["时长"]).value)

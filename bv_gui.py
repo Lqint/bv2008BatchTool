@@ -16,7 +16,6 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QGridLayout,
     QGroupBox,
-    QHBoxLayout,
     QLabel,
     QLineEdit,
     QListWidget,
@@ -30,13 +29,6 @@ from PySide6.QtWidgets import (
 
 from bv_api import BVApi, PostInfo
 from bv_batch_runner import BatchConfig, result_output_path, run_batch
-
-try:
-    from config import ACTIVITY_ID, ORG_ID, TOKEN
-except ImportError:
-    ACTIVITY_ID = ""
-    ORG_ID = ""
-    TOKEN = ""
 
 
 class Worker(QObject):
@@ -113,7 +105,7 @@ class BatchWorker(Worker):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("bv2008 志愿时长批量录入")
+        self.setWindowTitle("志愿北京时长批量录入")
         self.resize(1100, 760)
 
         self.posts: list[PostInfo] = []
@@ -122,10 +114,10 @@ class MainWindow(QMainWindow):
         self.active_threads: list[QThread] = []
         self.active_workers: list[Worker] = []
 
-        self.token_input = QLineEdit(TOKEN)
+        self.token_input = QLineEdit()
         self.token_input.setEchoMode(QLineEdit.Password)
-        self.activity_input = QLineEdit(ACTIVITY_ID)
-        self.org_input = QLineEdit(ORG_ID)
+        self.activity_input = QLineEdit()
+        self.org_input = QLineEdit()
         self.xlsx_label = QLabel("未选择")
         self.proof_label = QLabel("未选择，将使用 1x1 PNG 占位图")
         self.date_input = QDateEdit(QDate.currentDate())
@@ -206,13 +198,15 @@ class MainWindow(QMainWindow):
         self.setStyleSheet(
             """
             QWidget { font-family: "Microsoft YaHei", "Segoe UI", sans-serif; font-size: 13px; }
-            QMainWindow { background: #f6f7f9; }
-            QGroupBox { border: 1px solid #d7dce2; border-radius: 6px; margin-top: 10px; padding: 10px; background: #ffffff; }
-            QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 4px; color: #26313d; font-weight: 600; }
-            QLineEdit, QDateEdit, QPlainTextEdit, QListWidget { border: 1px solid #cfd6de; border-radius: 4px; padding: 6px; background: #ffffff; }
-            QPushButton { border: 1px solid #2364aa; border-radius: 4px; padding: 8px 10px; color: #ffffff; background: #2f76c2; font-weight: 600; }
-            QPushButton:disabled { background: #9aa8b5; border-color: #9aa8b5; }
-            QLabel { color: #354251; }
+            QMainWindow { background: rgb(248, 244, 238); }
+            QWidget { background: rgb(248, 244, 238); }
+            QGroupBox { border: 1px solid #d8cfc4; border-radius: 6px; margin-top: 10px; padding: 10px; background: #fffdfa; }
+            QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 4px; color: #2f2523; font-weight: 600; }
+            QLineEdit, QDateEdit, QPlainTextEdit, QListWidget { border: 1px solid #d1c7bb; border-radius: 4px; padding: 6px; background: #ffffff; color: #2f2523; }
+            QPushButton { border: 1px solid rgb(174, 11, 42); border-radius: 4px; padding: 8px 10px; color: #ffffff; background: rgb(174, 11, 42); font-weight: 600; }
+            QPushButton:hover { background: #8f0924; border-color: #8f0924; }
+            QPushButton:disabled { background: #b8aaa9; border-color: #b8aaa9; }
+            QLabel { color: #3d302d; }
             """
         )
 
