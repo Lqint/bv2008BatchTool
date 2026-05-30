@@ -24,6 +24,7 @@ app_id, interface_id, version, header, biz_content, charset, timestamp, origin, 
 |---|---|---|
 | `getInSm2Key` | `zybjfront` | Returns the current public key for SM2 encryption. |
 | `addMember` | `zybjfront` | Adds a registered volunteer to the org member pool by encrypted `name` and `certNo`. Business success is `data.code == 200`; `50000` usually carries a useful `message`. |
+| `findPostList` | `zybjfront` | Lists posts under an activity by `activityId` and `orgId`; returns `postName` and `postCode`. |
 | `activityUser-findOrgUserList` | `zybjfront` | Searches org members by encrypted name and, when available, encrypted `certNo`; returns uid candidates. |
 | `activityUser-addList` | `zybjfront` | Adds uid values to an activity post. Run this before recording hours. |
 | `zybj_uploadFile` | `zybjuser` | Uploads proof image and returns `newName`; the file path is single-use. |
@@ -53,6 +54,39 @@ Observed response shape:
 ```
 
 When the person is not registered as a volunteer, the business code may be `50000` and the useful explanation is in `data.message`.
+
+## findPostList
+
+Request `biz_content`:
+
+```json
+{
+  "activityId": "<activity id>",
+  "orgId": "<org id>"
+}
+```
+
+Observed response data shape:
+
+```json
+{
+  "success": true,
+  "message": "成功",
+  "code": "200",
+  "data": {
+    "resultData": {
+      "dataList": [
+        {
+          "postName": "测试",
+          "postCode": "1510325812778237952"
+        }
+      ]
+    }
+  }
+}
+```
+
+`postName` is the post name and `postCode` is the post ID used as `POST_ID`.
 
 ## activityUser-findOrgUserList
 

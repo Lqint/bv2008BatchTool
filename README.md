@@ -83,6 +83,18 @@ python3 bv_import.py --cert-no 110101199001011234 张三
 python3 bv_import.py 张三 李四 王五
 ```
 
+### 查看活动岗位
+
+通过活动 ID 和组织 ID 查询该活动下的岗位名称和岗位 ID：
+
+```bash
+# 使用 config.py 里的 ACTIVITY_ID / ORG_ID
+python3 bv_find_posts.py
+
+# 或在命令行指定
+python3 bv_find_posts.py --activity-id 1510325811016630272 --org-id <orgId>
+```
+
 ### 录入单人时数
 
 ```bash
@@ -161,6 +173,7 @@ encrypted = "04" + SM2.encrypt(plaintext, pk, mode=1)
 |---|---|---|
 | `getInSm2Key` | zybjfront | 取加密公钥 |
 | `addMember` | zybjfront | 按加密姓名和证件号加入团体成员池 |
+| `findPostList` | zybjfront | 按 `activityId` 和 `orgId` 查询岗位名称与岗位 ID |
 | `activityUser-findOrgUserList` | zybjfront | 按加密姓名查 uid；有证件号时同时传加密 `certNo` |
 | `activityUser-addList` | zybjfront | 批量加入岗位 |
 | `zybj_uploadFile` | **zybjuser** | 上传证明图，返回 newName |
@@ -187,6 +200,7 @@ encrypted = "04" + SM2.encrypt(plaintext, pk, mode=1)
 ├── bv_client.py        # 通用网关客户端
 ├── bv_import.py        # 批量添加成员
 ├── bv_add_org_member.py # 按姓名+证件号将志愿者加入团体成员池
+├── bv_find_posts.py    # 按活动 ID 查询岗位名称和岗位 ID
 ├── bv_record_hours.py  # 单人时数录入
 ├── bv_batch_from_xls.py# Excel 批量时数录入（按姓名搜索）
 ├── bv_hours_for_roster.py # 已招募成员批量时数（直接拉名单）
