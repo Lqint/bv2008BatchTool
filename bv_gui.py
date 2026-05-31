@@ -3,11 +3,13 @@ from __future__ import annotations
 
 import io
 import mimetypes
+import shutil
 import sys
 import time
 from datetime import date
 from pathlib import Path
 
+from openpyxl import Workbook
 import qrcode
 from PySide6.QtCore import QDate, QObject, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QPixmap
@@ -17,6 +19,7 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QGridLayout,
     QGroupBox,
+    QHBoxLayout,
     QLabel,
     QLineEdit,
     QListWidget,
@@ -29,7 +32,7 @@ from PySide6.QtWidgets import (
 )
 
 from bv_api import BVApi, PostInfo
-from bv_batch_runner import BatchConfig, result_output_path, run_batch
+from bv_batch_runner import BatchConfig, REQUIRED_HEADERS, result_output_path, run_batch
 
 
 class Worker(QObject):
@@ -172,9 +175,14 @@ class MainWindow(QMainWindow):
         upload_layout = QVBoxLayout(upload_box)
         xlsx_btn = QPushButton("选择 xlsx 表格")
         xlsx_btn.clicked.connect(self.select_xlsx)
+        template_btn = QPushButton("下载模板")
+        template_btn.clicked.connect(self.download_template)
+        xlsx_buttons = QHBoxLayout()
+        xlsx_buttons.addWidget(xlsx_btn, 7)
+        xlsx_buttons.addWidget(template_btn, 3)
         proof_btn = QPushButton("选择 jpg/png 证明材料（可选）")
         proof_btn.clicked.connect(self.select_proof)
-        upload_layout.addWidget(xlsx_btn)
+        upload_layout.addLayout(xlsx_buttons)
         upload_layout.addWidget(self.xlsx_label)
         upload_layout.addWidget(proof_btn)
         upload_layout.addWidget(self.proof_label)
@@ -288,6 +296,44 @@ class MainWindow(QMainWindow):
             self.xlsx_path = Path(path)
             self.xlsx_label.setText(str(self.xlsx_path))
 
+    def download_template(self) -> None:
+        path, _ = QFileDialog.getSaveFileName(self, "保存模板", "模板.xlsx", "Excel Workbook (*.xlsx)")
+        if not path:
+            return
+        output = Path(path)
+        if output.suffix.lower() != ".xlsx":
+            output = output.with_suffix(".xlsx")
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "志愿时长导入模板"
+        ws.append(REQUIRED_HEADERS)
+        ws.append(["张三", "110101199001011234", "示例岗位", 10])
+        ws.append(["李四", "", "示例岗位", 5])
+        wb.save(output)
+        QMessageBox.information(self, "模板已保存", f"模板已保存至：\n{output}")
+
+    def resource_path(self, filename: str) -> Path:
+        cwd_path = Path.cwd() / filename
+        if cwd_path.exists():
+            return cwd_path
+        if getattr(sys, "frozen", False):
+            return Path(sys.executable).resolve().parent / filename
+        return Path(__file__).resolve().parent / filename
+
+    def download_support_doc(self) -> None:
+        source = self.resource_path("配套文档.png")
+        if not source.exists():
+            QMessageBox.warning(self, "未找到配套文档", f"未找到：\n{source}")
+            return
+        path, _ = QFileDialog.getSaveFileName(self, "保存配套文档", "配套文档.png", "PNG Image (*.png)")
+        if not path:
+            return
+        output = Path(path)
+        if output.suffix.lower() != ".png":
+            output = output.with_suffix(".png")
+        shutil.copyfile(source, output)
+        QMessageBox.information(self, "配套文档已保存", f"配套文档已保存至：\n{output}")
+
     def show_start_notice(self) -> None:
         notice = (
             "使用本工具前，请您仔细阅读下面的通知：\n\n"
@@ -301,7 +347,18 @@ class MainWindow(QMainWindow):
             "8. 录入结果将保存至 *_result.xlsx。本程序为个人开发，未经过全面测试，请在程序执行成功后检查结果文件，并到“志愿北京”平台核查，防止出现错误。\n\n"
             "9. API 逆向与网关接口由 GitHub @Lqint 实现；重构与可视化界面由 GitHub @xiaoyuer5126 实现。"
         )
-        QMessageBox.information(self, "重要使用须知", notice)
+        while True:
+            box = QMessageBox(self)
+            box.setWindowTitle("重要使用须知")
+            box.setIcon(QMessageBox.Information)
+            box.setText(notice)
+            doc_button = box.addButton("下载配套文档", QMessageBox.ActionRole)
+            box.addButton("我已知晓", QMessageBox.AcceptRole)
+            box.exec()
+            if box.clickedButton() == doc_button:
+                self.download_support_doc()
+                continue
+            break
 
     def select_proof(self) -> None:
         path, _ = QFileDialog.getOpenFileName(self, "选择 jpg/png 证明材料", "", "Images (*.jpg *.jpeg *.png)")

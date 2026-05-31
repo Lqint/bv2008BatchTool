@@ -7,6 +7,7 @@ python -m PyInstaller `
   --clean `
   --windowed `
   --name bv2008BatchTool `
+  --add-data "配套文档.png;." `
   bv_gui.py
 
 Write-Host ""
