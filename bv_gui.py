@@ -2,13 +2,14 @@
 from __future__ import annotations
 
 import io
+import mimetypes
 import sys
 import time
 from datetime import date
 from pathlib import Path
 
 import qrcode
-from PySide6.QtCore import QDate, QObject, Qt, QThread, Signal
+from PySide6.QtCore import QDate, QObject, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QApplication,
@@ -105,7 +106,7 @@ class BatchWorker(Worker):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("志愿北京时长批量录入")
+        self.setWindowTitle("志愿北京时长批量录入v1")
         self.resize(1100, 760)
 
         self.posts: list[PostInfo] = []
@@ -123,16 +124,17 @@ class MainWindow(QMainWindow):
         self.date_input = QDateEdit(QDate.currentDate())
         self.date_input.setCalendarPopup(True)
         self.post_list = QListWidget()
-        self.qr_label = QLabel("点击生成二维码")
+        self.qr_label = QLabel("点击按钮生成二维码")
         self.qr_label.setAlignment(Qt.AlignCenter)
         self.qr_label.setMinimumSize(220, 220)
         self.log = QPlainTextEdit()
         self.log.setReadOnly(True)
-        self.qr_button = QPushButton("生成扫码二维码")
+        self.qr_button = QPushButton("生成登录二维码")
         self.start_button = QPushButton("开始批量录入")
         self.result_label = QLabel("")
 
         self.setup_ui()
+        QTimer.singleShot(0, self.show_start_notice)
 
     def setup_ui(self) -> None:
         root = QWidget()
@@ -151,7 +153,7 @@ class MainWindow(QMainWindow):
         login_layout.addWidget(self.qr_label)
         self.qr_button.clicked.connect(self.create_qr)
         login_layout.addWidget(self.qr_button)
-        login_layout.addWidget(QLabel("或手动粘贴 TOKEN"))
+        login_layout.addWidget(QLabel("或手动粘贴 TOKEN（调试用）"))
         login_layout.addWidget(self.token_input)
         left.addWidget(login_box)
 
@@ -170,13 +172,13 @@ class MainWindow(QMainWindow):
         upload_layout = QVBoxLayout(upload_box)
         xlsx_btn = QPushButton("选择 xlsx 表格")
         xlsx_btn.clicked.connect(self.select_xlsx)
-        proof_btn = QPushButton("选择 png 证明材料（可选）")
+        proof_btn = QPushButton("选择 jpg/png 证明材料（可选）")
         proof_btn.clicked.connect(self.select_proof)
         upload_layout.addWidget(xlsx_btn)
         upload_layout.addWidget(self.xlsx_label)
         upload_layout.addWidget(proof_btn)
         upload_layout.addWidget(self.proof_label)
-        upload_layout.addWidget(QLabel("志愿录入起始日期"))
+        upload_layout.addWidget(QLabel("志愿录入起始日期（请对齐活动日期）"))
         upload_layout.addWidget(self.date_input)
         left.addWidget(upload_box)
 
@@ -286,8 +288,23 @@ class MainWindow(QMainWindow):
             self.xlsx_path = Path(path)
             self.xlsx_label.setText(str(self.xlsx_path))
 
+    def show_start_notice(self) -> None:
+        notice = (
+            "使用本工具前，请您仔细阅读下面的通知：\n\n"
+            "1. 本工具用于“志愿北京”新版平台的志愿时长批量录入，旨在方便青协同学处理工作。请仅在自己负责的组织、合规的志愿者管理流程中使用；因未授权、误用或不当使用造成的后果，由使用者自行承担，开发者不承担相关责任。\n\n"
+            "2. 请按左侧操作区的顺序依次完成登录、填写活动参数、获取岗位、上传表格、选择起始日期、启动批量录入。\n\n"
+            "3. 您仍需手动在“志愿北京”网站上完成创建项目、创建子项目、创建活动流程。本工具只用于提高招募志愿者和录入时长的效率。\n\n"
+            "4. 活动 ID、组织 ID 需自行从“志愿北京”网站获取，获取方式请参考配套文档。\n\n"
+            "5. 表格需包含列：姓名、身份证号（选填）、岗位、时长。您可使用提供的模板.xlsx。岗位列内容必须与“志愿北京”平台一致，也就是与右侧自动获取的岗位列表一致。\n\n"
+            "6. 图片证明材料仅支持 jpg/png 格式；未选择证明材料时，程序会自动使用 1x1 PNG 占位图。\n\n"
+            "7. 每日最多录入 10 小时，程序会自动计算可行性，超出可录入范围的记录将会跳过并写入原因。\n\n"
+            "8. 录入结果将保存至 *_result.xlsx。本程序为个人开发，未经过全面测试，请在程序执行成功后检查结果文件，并到“志愿北京”平台核查，防止出现错误。\n\n"
+            "9. API 逆向与网关接口由 GitHub @Lqint 实现；重构与可视化界面由 GitHub @xiaoyuer5126 实现。"
+        )
+        QMessageBox.information(self, "重要使用须知", notice)
+
     def select_proof(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(self, "选择 png 证明材料", "", "PNG Image (*.png)")
+        path, _ = QFileDialog.getOpenFileName(self, "选择 jpg/png 证明材料", "", "Images (*.jpg *.jpeg *.png)")
         if path:
             self.proof_path = Path(path)
             self.proof_label.setText(str(self.proof_path))
@@ -308,12 +325,14 @@ class MainWindow(QMainWindow):
 
         proof_name = None
         proof_bytes = None
+        proof_mime = None
         if self.proof_path:
-            if self.proof_path.suffix.lower() != ".png":
-                self.show_error("证明材料必须是 png 图片")
+            if self.proof_path.suffix.lower() not in {".jpg", ".jpeg", ".png"}:
+                self.show_error("证明材料必须是 jpg 或 png 图片")
                 return
             proof_name = self.proof_path.name
             proof_bytes = self.proof_path.read_bytes()
+            proof_mime = mimetypes.guess_type(proof_name)[0] or "application/octet-stream"
 
         qdate = self.date_input.date()
         start_date = date(qdate.year(), qdate.month(), qdate.day())
@@ -326,6 +345,7 @@ class MainWindow(QMainWindow):
             output_path=result_output_path(self.xlsx_path),
             proof_name=proof_name,
             proof_bytes=proof_bytes,
+            proof_mime=proof_mime,
         )
 
         self.start_button.setEnabled(False)

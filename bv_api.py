@@ -11,7 +11,7 @@ from gmssl import func, sm2, sm3
 
 GATEWAY = "https://test1.bv2008.cn/api-gateway/jpaas-jags-server/interface/gateway"
 APP_ID = "zybjfront"
-REQUEST_DELAY_SECONDS = 3
+REQUEST_DELAY_SECONDS = 1
 
 TINY_PNG_B64 = (
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
@@ -203,12 +203,14 @@ class BVApi:
         }
         unwrap_success(self.call("activityUser-addList", biz))
 
-    def upload_proof(self, filename: str | None, data: bytes | None) -> str:
+    def upload_proof(self, filename: str | None, data: bytes | None, mime: str | None = None) -> str:
         if not data:
             filename = "proof.png"
             data = base64.b64decode(TINY_PNG_B64)
+            mime = "image/png"
         else:
             filename = filename or "proof.png"
+            mime = mime or "application/octet-stream"
         biz = {
             "file": {"uid": f"vc-upload-{int(time.time() * 1000)}-1"},
             "uploadType": "durationFile",
@@ -217,7 +219,7 @@ class BVApi:
             "zybj_uploadFile",
             biz,
             app_id="zybjuser",
-            file=(filename, data, "image/png"),
+            file=(filename, data, mime),
         )
         result = unwrap_success(resp)
         return result["resultData"]["fileData"]["newName"]

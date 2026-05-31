@@ -23,6 +23,7 @@ class BatchConfig:
     output_path: Path
     proof_name: str | None = None
     proof_bytes: bytes | None = None
+    proof_mime: str | None = None
 
 
 REQUIRED_HEADERS = ["姓名", "身份证号（选填）", "岗位", "时长"]
@@ -112,6 +113,7 @@ def process_row(
     start_date: date,
     proof_name: str | None,
     proof_bytes: bytes | None,
+    proof_mime: str | None,
 ) -> str:
     times = allocate_hours(hours, start_date)
 
@@ -136,7 +138,7 @@ def process_row(
         if "已经在此活动中" not in str(exc):
             return f"失败：加入岗位失败 postId={post_id}：{exc}"
 
-    file_path = api.upload_proof(proof_name, proof_bytes)
+    file_path = api.upload_proof(proof_name, proof_bytes, proof_mime)
     result = api.record_hours(activity_id, post_id, org_id, uid, times, file_path)
     if result.get("resultData") is False:
         return f"失败：录入接口返回失败：{result}"
@@ -191,6 +193,7 @@ def run_batch(config: BatchConfig, posts: list[PostInfo], progress: ProgressCall
                 start_date=config.start_date,
                 proof_name=config.proof_name,
                 proof_bytes=config.proof_bytes,
+                proof_mime=config.proof_mime,
             )
         except Exception as exc:
             result = f"失败：{exc}"
