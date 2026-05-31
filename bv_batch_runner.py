@@ -133,11 +133,7 @@ def process_row(
     if not uid:
         return "失败：查询结果缺少 uid"
 
-    try:
-        api.add_to_post(activity_id, post_id, org_id, uid)
-    except Exception as exc:
-        if "已经在此活动中" not in str(exc):
-            return f"失败：加入岗位失败 postId={post_id}：{exc}"
+    api.add_to_post(activity_id, post_id, org_id, uid)
 
     file_path = api.upload_proof(proof_name, proof_bytes, proof_mime)
     result = api.record_hours(activity_id, post_id, org_id, uid, times, file_path, notes=notes)

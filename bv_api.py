@@ -201,7 +201,11 @@ class BVApi:
             "orgId": org_id,
             "uids": [uid],
         }
-        unwrap_success(self.call("activityUser-addList", biz))
+        try:
+            unwrap_success(self.call("activityUser-addList", biz))
+        except Exception as exc:
+            if "人员已经在此活动中" not in str(exc):
+                raise RuntimeError(f"加入岗位失败：{exc}")
 
     def upload_proof(self, filename: str | None, data: bytes | None, mime: str | None = None) -> str:
         if not data:

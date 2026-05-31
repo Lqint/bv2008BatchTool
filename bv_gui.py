@@ -109,7 +109,7 @@ class BatchWorker(Worker):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("志愿北京时长批量录入v1")
+        self.setWindowTitle("志愿北京时长批量录入v2")
         self.resize(1100, 760)
 
         self.posts: list[PostInfo] = []
@@ -134,6 +134,7 @@ class MainWindow(QMainWindow):
         self.log.setReadOnly(True)
         self.qr_button = QPushButton("生成登录二维码")
         self.start_button = QPushButton("开始批量录入")
+        self.notice_button = QPushButton("查看须知")
         self.result_label = QLabel("")
 
         self.setup_ui()
@@ -193,6 +194,12 @@ class MainWindow(QMainWindow):
         self.start_button.clicked.connect(self.start_batch)
         left.addWidget(self.start_button)
         left.addStretch(1)
+
+        notice_bar = QHBoxLayout()
+        notice_bar.addStretch(1)
+        self.notice_button.clicked.connect(self.show_start_notice)
+        notice_bar.addWidget(self.notice_button)
+        right.addLayout(notice_bar)
 
         posts_box = QGroupBox("岗位列表（表格中的“岗位”列需匹配这里的名称）")
         posts_layout = QVBoxLayout(posts_box)
@@ -309,6 +316,7 @@ class MainWindow(QMainWindow):
         ws.append(REQUIRED_HEADERS)
         ws.append(["张三", "110101199001011234", "示例岗位", 10, "示例备注"])
         ws.append(["李四", "", "示例岗位", 5, ""])
+        ws.column_dimensions["B"].width = 24
         wb.save(output)
         QMessageBox.information(self, "模板已保存", f"模板已保存至：\n{output}")
 
@@ -343,20 +351,24 @@ class MainWindow(QMainWindow):
         notice = (
             "使用本工具前，请您仔细阅读下面的通知：\n\n"
             "1. 本工具用于“志愿北京”新版平台的志愿时长批量录入，旨在方便青协同学处理工作。请仅在自己负责的组织、合规的志愿者管理流程中使用；因未授权、误用或不当使用造成的后果，由使用者自行承担，开发者不承担相关责任。\n\n"
-            "2. 请按左侧操作区的顺序依次完成登录、填写活动参数、获取岗位、上传表格、选择起始日期、启动批量录入。\n\n"
-            "3. 您仍需手动在“志愿北京”网站上完成创建项目、创建子项目、创建活动流程。本工具只用于提高招募志愿者和录入时长的效率。\n\n"
-            "4. 活动 ID、组织 ID 需自行从“志愿北京”网站获取，获取方式请参考配套文档。\n\n"
-            "5. 表格需包含列：姓名、身份证号（选填）、岗位、时长、备注（选填）。您可使用提供的模板.xlsx。岗位列内容必须与“志愿北京”平台一致，也就是与右侧自动获取的岗位列表一致。\n\n"
-            "6. 图片证明材料仅支持 jpg/png 格式；未选择证明材料时，程序会自动使用 1x1 PNG 占位图。\n\n"
-            "7. 每日最多录入 10 小时，程序会自动计算可行性，超出可录入范围的记录将会跳过并写入原因。\n\n"
-            "8. 录入结果将保存至 *_result.xlsx。本程序为个人开发，未经过全面测试，请在程序执行成功后检查结果文件，并到“志愿北京”平台核查，防止出现错误。\n\n"
-            "9. API 逆向与网关接口由 GitHub @Lqint 实现；重构与可视化界面由 GitHub @xiaoyuer5126 实现。"
+            "2. 本工具为 v2 版本，后续可能仍会更新。请在使用前确认当前程序为最新版本。\n\n"
+            "3. 本工具链路：根据姓名和身份证号(如有)在团体内查询志愿者id->若未查到且已填写身份证号，将其加入团体->使用uid加入对应岗位->录入志愿时长。\n\n"
+            "4. 请按左侧操作区的顺序依次完成登录、填写活动参数、获取岗位、上传表格、选择起始日期、启动批量录入。\n\n"
+            "5. 您仍需手动在“志愿北京”网站上完成创建项目、创建子项目、创建活动流程。本工具只用于提高招募志愿者和录入时长的效率。\n\n"
+            "6. 活动 ID、组织 ID 需自行从“志愿北京”网站获取，获取方式请参考配套文档。\n\n"
+            "7. 表格需包含列：姓名、身份证号（选填）、岗位、时长、备注（选填）。您可使用提供的模板.xlsx。岗位列内容必须与“志愿北京”平台一致，也就是与右侧自动获取的岗位列表一致。\n\n"
+            "8. 图片证明材料仅支持 jpg/png 格式；未选择证明材料时，程序会自动使用 1x1 PNG 占位图。\n\n"
+            "9. 每日最多录入 10 小时，程序会自动计算可行性，超出可录入范围的记录将会跳过并写入原因。目前仅支持连续日期录入。\n\n"
+            "10. 录入结果将保存至 *_result.xlsx。本程序为个人开发，未经过全面测试，请在程序执行成功后检查结果文件，并到“志愿北京”平台核查，防止出现错误。\n\n"
+            "11. API 逆向与网关接口由 GitHub @Lqint 实现；重构与可视化界面由 GitHub @xiaoyuer5126 实现。"
         )
         while True:
             box = QMessageBox(self)
             box.setWindowTitle("重要使用须知")
             box.setIcon(QMessageBox.Information)
             box.setText(notice)
+            box.setMinimumWidth(860)
+            box.layout().setColumnMinimumWidth(1, 720)
             doc_button = box.addButton("下载配套文档", QMessageBox.ActionRole)
             box.addButton("我已知晓", QMessageBox.AcceptRole)
             box.exec()
