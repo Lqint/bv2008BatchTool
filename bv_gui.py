@@ -366,7 +366,7 @@ class MainWindow(QMainWindow):
             box.setIcon(QMessageBox.Information)
             box.setText(notice)
             box.setMinimumWidth(860)
-            box.layout().setColumnMinimumWidth(1, 720)
+            box.layout().setColumnMinimumWidth(2, 720)
             doc_button = box.addButton("下载配套文档", QMessageBox.ActionRole)
             box.addButton("我已知晓", QMessageBox.AcceptRole)
             box.exec()
