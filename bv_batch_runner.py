@@ -26,7 +26,7 @@ class BatchConfig:
     proof_mime: str | None = None
 
 
-REQUIRED_HEADERS = ["姓名", "身份证号（选填）", "岗位", "时长"]
+REQUIRED_HEADERS = ["姓名", "身份证号（选填）", "岗位", "时长", "备注（选填）"]
 RESULT_HEADER = "录入结果"
 
 
@@ -110,6 +110,7 @@ def process_row(
     name: str,
     cert_no: str,
     hours: float,
+    notes: str,
     start_date: date,
     proof_name: str | None,
     proof_bytes: bytes | None,
@@ -139,7 +140,7 @@ def process_row(
             return f"失败：加入岗位失败 postId={post_id}：{exc}"
 
     file_path = api.upload_proof(proof_name, proof_bytes, proof_mime)
-    result = api.record_hours(activity_id, post_id, org_id, uid, times, file_path)
+    result = api.record_hours(activity_id, post_id, org_id, uid, times, file_path, notes=notes)
     if result.get("resultData") is False:
         return f"失败：录入接口返回失败：{result}"
     return "成功"
@@ -160,6 +161,7 @@ def run_batch(config: BatchConfig, posts: list[PostInfo], progress: ProgressCall
         name = normalize_text(ws.cell(row=row, column=index["姓名"]).value)
         cert_no = normalize_text(ws.cell(row=row, column=index["身份证号（选填）"]).value)
         post_name = normalize_text(ws.cell(row=row, column=index["岗位"]).value)
+        notes = normalize_text(ws.cell(row=row, column=index["备注（选填）"]).value)
         try:
             hours = parse_hours(ws.cell(row=row, column=index["时长"]).value)
         except Exception as exc:
@@ -190,6 +192,7 @@ def run_batch(config: BatchConfig, posts: list[PostInfo], progress: ProgressCall
                 name=name,
                 cert_no=cert_no,
                 hours=hours,
+                notes=notes,
                 start_date=config.start_date,
                 proof_name=config.proof_name,
                 proof_bytes=config.proof_bytes,
