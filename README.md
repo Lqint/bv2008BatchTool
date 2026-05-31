@@ -36,7 +36,7 @@
 每一行按以下顺序执行：
 
 ```text
-findOrgUserList（姓名+身份证号，或仅姓名）
+findOrgUserList（姓名+身份证号，或仅姓名，postId 固定传 1）
   → 找不到且有身份证号：addMember 加入团体，再重新查询
   → addMember 返回“该用户已加入团体”时视为成功
   → 找不到且无身份证号：跳过并写入原因
@@ -48,6 +48,8 @@ findOrgUserList（姓名+身份证号，或仅姓名）
 ```
 
 注意：`activityTiming-batchAdd` 不校验成员是否已入岗，所以本工具始终先执行 `activityUser-addList`，避免时长记录和岗位名单不一致。
+
+`findOrgUserList` 在本工具中用于查询志愿者 uid。为避免具体岗位过滤导致已在岗志愿者查不到，查询 uid 时 `postId` 固定传 `1`；真正加入岗位和录入时长时仍使用表格岗位匹配到的真实岗位 ID。
 
 ## 本地运行
 

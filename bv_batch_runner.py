@@ -118,16 +118,16 @@ def process_row(
 ) -> str:
     times = allocate_hours(hours, start_date)
 
-    user = api.find_org_user(name, cert_no, activity_id, post_id, org_id)
+    user = api.find_org_user(name, cert_no, activity_id, "1", org_id)
     if not user:
         if not cert_no:
-            return "失败：按姓名未查询到志愿者，且缺少身份证号，无法加入团体"
+            return "失败：按姓名在团体内未查询到志愿者，且缺少身份证号，无法加入团体"
         ok, message = api.add_member(name, cert_no)
         if not ok:
             return f"失败：加入团体失败：{message}"
         user = api.find_org_user(name, cert_no, activity_id, "1", org_id)
         if not user:
-            return "失败：加入团体后使用通配符仍未查询到 uid"
+            return "失败：加入团体后仍未查询到 uid"
 
     uid = str(user.get("uid", "")).strip()
     if not uid:
