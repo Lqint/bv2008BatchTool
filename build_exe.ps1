@@ -2,11 +2,9 @@ $ErrorActionPreference = "Stop"
 
 python -m pip install -r requirements.txt
 
-$doc = Get-ChildItem -Path . -Filter "*.png" | Select-Object -First 1
-if (-not $doc) {
-  throw "No PNG support document found in project root."
+if (-not (Test-Path ".\support_doc.png")) {
+  throw "No support_doc.png found in project root."
 }
-Copy-Item -LiteralPath $doc.FullName -Destination ".\support_doc.png" -Force
 
 python -m PyInstaller `
   --noconfirm `
@@ -20,8 +18,6 @@ python -m PyInstaller `
 if ($LASTEXITCODE -ne 0) {
   exit $LASTEXITCODE
 }
-
-Remove-Item ".\support_doc.png" -Force
 
 Write-Host ""
 Write-Host "Build complete: dist\bv2008BatchTool.exe"

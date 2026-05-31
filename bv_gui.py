@@ -332,9 +332,7 @@ class MainWindow(QMainWindow):
         return Path(__file__).resolve().parent / filename
 
     def download_support_doc(self) -> None:
-        source = self.resource_path("配套文档.png")
-        if not source.exists():
-            source = self.resource_path("support_doc.png")
+        source = self.resource_path("support_doc.png")
         if not source.exists():
             QMessageBox.warning(self, "未找到配套文档", f"未找到：\n{source}")
             return

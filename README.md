@@ -84,6 +84,6 @@ dist\bv2008BatchTool\bv2008BatchTool.exe
 ├── bv_batch_runner.py  # xlsx 读取、批处理、结果写回
 ├── requirements.txt    # 运行与打包依赖
 ├── build_exe.ps1       # Windows 打包脚本
-├── 配套文档.png        # 启动通知中的配套文档下载源
+├── support_doc.png     # 启动通知中的配套文档下载源
 └── LICENSE
 ```
