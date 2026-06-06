@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, timedelta
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Callable
 
@@ -45,10 +46,17 @@ def normalize_text(value) -> str:
 def parse_hours(value) -> float:
     if value is None or str(value).strip() == "":
         raise ValueError("时长为空")
-    hours = float(value)
-    if hours <= 0:
+    try:
+        hours_decimal = Decimal(str(value).strip())
+    except InvalidOperation:
+        raise ValueError("时长必须是数字") from None
+    if not hours_decimal.is_finite():
+        raise ValueError("时长必须是数字")
+    if hours_decimal <= 0:
         raise ValueError("时长必须大于 0")
-    return hours
+    if (hours_decimal * 2) != (hours_decimal * 2).to_integral_value():
+        raise ValueError("时长只能填写整数或 .5 小数")
+    return float(hours_decimal)
 
 
 def allocate_hours(hours: float, start: date, today: date | None = None, max_per_day: float = 10.0) -> list[tuple[str, float]]:
