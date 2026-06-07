@@ -116,6 +116,25 @@ python3 bv_batch_from_xls.py roster.xls --start 2026-05-01 --max-hours 8
 
 Excel 格式要求：第一行表头含 `学生姓名` 和 `认定时(次)数` 列。
 
+### 获取项目 ID
+
+如果只知道组织 ID（`org_id` / `ORG_ID`），可以先用 `bv_list_projects.py` 拉取该组织下的项目列表：
+
+```bash
+python3 bv_list_projects.py
+
+# 或临时指定组织 ID / token
+python3 bv_list_projects.py --org-id 223718004 --token "<accessToken>"
+
+# 输出 JSON，便于脚本继续处理
+python3 bv_list_projects.py --org-id 223718004 --json
+```
+
+输出中的 `project_id` 对应接口返回字段 `iid`。
+
+- `level=1`：一级项目
+- `level=2`：二级项目，通常用于活动列表接口的 `projectId`
+
 ---
 
 ## 技术原理
@@ -187,6 +206,7 @@ encrypted = "04" + SM2.encrypt(plaintext, pk, mode=1)
 ├── bv_record_hours.py  # 单人时数录入
 ├── bv_batch_from_xls.py# Excel 批量时数录入（按姓名搜索）
 ├── bv_hours_for_roster.py # 已招募成员批量时数（直接拉名单）
+├── bv_list_projects.py # 从组织账号拉取活动id
 ├── names.example.txt   # 姓名名单示例
 ├── api.md              # 接口抓包/逆向记录模板
 ├── requirements.txt
