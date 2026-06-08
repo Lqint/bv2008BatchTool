@@ -212,3 +212,19 @@ encrypted = "04" + SM2.encrypt(plaintext, pk, mode=1)
 ├── requirements.txt
 └── .gitignore
 ```
+
+## 新版图形界面
+
+推荐使用gui版本进行操作：
+
+```bash
+start_gui.bat
+```
+
+入口位于，主体代码拆分在 `bv2008_gui/` 目录中：
+
+- `api.py`：封装登录、组织、项目、活动、岗位、名单、录入接口
+- `config_store.py`：本地配置读写
+- `excel.py`：Excel 表头识别与推荐报表格式
+- `widgets.py`：通用 Tkinter 控件
+- `app.py`：登录、配置、名单、导入页面
