@@ -65,6 +65,26 @@ def upload_proof(token: str, path: Path | None = None) -> str:
     return unwrap(resp)["resultData"]["fileData"]["newName"]
 
 
+def roster_name_masks(name: str) -> set[str]:
+    clean = "".join(str(name).split())
+    if not clean:
+        return set()
+    masks = {"*" + clean[1:]}
+    if len(clean) > 2:
+        masks.add("*" + clean[-2:])
+    return masks
+
+
+def match_roster_user(row: ImportRow, roster: list[dict[str, Any]]) -> tuple[dict[str, Any] | None, str]:
+    masks = roster_name_masks(row.name)
+    matches = [user for user in roster if str(user.get("nameSensitive") or "") in masks and user.get("uid")]
+    if len(matches) == 1:
+        return matches[0], "matched"
+    if len(matches) > 1:
+        return None, f"multiple roster matches: {len(matches)}"
+    return None, "not found in roster"
+
+
 class BasePanel(ttk.Frame):
     def __init__(self, master: tk.Misc, app: "BVGuiApp") -> None:
         super().__init__(master, padding=12)
@@ -555,7 +575,15 @@ class ImportPanel(BasePanel):
             log(f"获取加密公钥失败：{exc}")
             return
 
+        try:
+            roster = api.fetch_roster(token, cfg["activity_id"], cfg["post_id"])
+            log(f"roster loaded: {len(roster)}")
+        except Exception as exc:
+            roster = []
+            log(f"roster load failed; falling back to org search only: {exc}")
+
         uid_by_index: dict[int, str] = {}
+        roster_uid_indexes: set[int] = set()
         for i, row in enumerate(rows):
             set_cell(i, "组织搜索", "搜索中")
             try:
@@ -570,6 +598,16 @@ class ImportPanel(BasePanel):
                     uid_by_index[i] = str(users[0]["uid"])
                     set_cell(i, "组织搜索", "完成")
                     set_cell(i, "状态", f"uid={users[0]['uid']}")
+                elif roster:
+                    roster_user, reason = match_roster_user(row, roster)
+                    if roster_user:
+                        uid_by_index[i] = str(roster_user["uid"])
+                        roster_uid_indexes.add(i)
+                        set_cell(i, "组织搜索", "岗位名单")
+                        set_cell(i, "状态", f"uid={roster_user['uid']} (岗位名单)")
+                    else:
+                        set_cell(i, "组织搜索", "未找到")
+                        set_cell(i, "状态", f"未找到，跳过 ({reason})")
                 else:
                     set_cell(i, "组织搜索", "未找到")
                     set_cell(i, "状态", "未找到，跳过")
@@ -582,16 +620,25 @@ class ImportPanel(BasePanel):
             log("没有可处理人员")
             return
 
-        try:
-            api.add_post_members(token, cfg["activity_id"], cfg["post_id"], cfg["org_id"], [uid_by_index[i] for i in valid])
-            for i in valid:
-                set_cell(i, "入岗", "完成")
-            log(f"已加入岗位：{len(valid)} 人")
-        except Exception as exc:
-            for i in valid:
-                set_cell(i, "入岗", "失败")
-            log(f"加入岗位失败，终止录入：{exc}")
-            return
+        for i in sorted(roster_uid_indexes):
+            set_cell(i, "入岗", "已在岗")
+
+        add_indexes = [i for i in valid if i not in roster_uid_indexes]
+        if add_indexes:
+            try:
+                api.add_post_members(token, cfg["activity_id"], cfg["post_id"], cfg["org_id"], [uid_by_index[i] for i in add_indexes])
+                for i in add_indexes:
+                    set_cell(i, "入岗", "完成")
+                log(f"已加入岗位：{len(add_indexes)} 人")
+            except Exception as exc:
+                for i in add_indexes:
+                    set_cell(i, "入岗", "失败")
+                log(f"加入岗位失败，跳过这些人员：{exc}")
+                valid = sorted(roster_uid_indexes)
+                if not valid:
+                    return
+        elif roster_uid_indexes:
+            log(f"岗位名单已在岗：{len(roster_uid_indexes)} 人")
 
         for i in valid:
             row = rows[i]
