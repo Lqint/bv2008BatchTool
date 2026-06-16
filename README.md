@@ -2,7 +2,7 @@
 
 逆向志愿北京（bv2008.cn）网关接口，实现志愿者批量导入与服务时数录入的自动化。
 
-`志愿北京管理终端.exe`测试版已上线欢迎通过release下载体验。
+`志愿北京管理终端.exe`测试版已上线欢迎通过[release](https://github.com/Lqint/bv2008BatchTool/tags)下载体验。
 
 ## ⚠️ 重要警示：录入时数前必须先 addList
 
