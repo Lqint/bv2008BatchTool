@@ -8,9 +8,7 @@
 
 **站点 bug**：`activityTiming-batchAdd` 不校验成员关系，直接写时数也能成功，但志愿者不会出现在岗位成员列表中，造成时数与名单不一致。
 
-**必须按顺序**：`findOrgUserList` → `addList` → `upload` → `batchAdd`
-
-`bv_batch_from_xls.py` 已在内部自动执行此顺序。
+如手动调用api操作，**必须按顺序**：`findOrgUserList` → `addList` → `upload` → `batchAdd`
 
 ---
 
