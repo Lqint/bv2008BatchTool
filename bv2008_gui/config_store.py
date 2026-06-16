@@ -5,7 +5,7 @@ from pathlib import Path
 
 
 CONFIG_PATH = Path.home() / ".bv2008_config.json"
-CONFIG_KEYS = ("token", "activity_id", "post_id", "org_id")
+CONFIG_KEYS = ("token", "activity_id", "post_id", "org_id", "tutorial_seen")
 
 
 def empty_config() -> dict[str, str]:
@@ -29,4 +29,3 @@ def save_config(cfg: dict[str, str]) -> None:
     data = empty_config()
     data.update({key: str(cfg.get(key, "")) for key in CONFIG_KEYS})
     CONFIG_PATH.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-

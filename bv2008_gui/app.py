@@ -87,8 +87,27 @@ def match_roster_user(row: ImportRow, roster: list[dict[str, Any]]) -> tuple[dic
 
 class BasePanel(ttk.Frame):
     def __init__(self, master: tk.Misc, app: "BVGuiApp") -> None:
-        super().__init__(master, padding=12)
+        super().__init__(master, style="Content.TFrame", padding=(16, 14))
         self.app = app
+
+    def page_header(self, title: str, subtitle: str = "") -> None:
+        header = ttk.Frame(self, style="Content.TFrame")
+        header.pack(fill="x", pady=(0, 10))
+        ttk.Label(header, text=title, style="PageTitle.TLabel").pack(anchor="w")
+        if subtitle:
+            ttk.Label(header, text=subtitle, style="Muted.TLabel").pack(anchor="w", pady=(5, 0))
+
+    def section(self, title: str, subtitle: str = "") -> ttk.Frame:
+        outer = ttk.Frame(self, style="Card.TFrame", padding=(14, 12))
+        outer.pack(fill="x", pady=(0, 10))
+        ttk.Label(outer, text=title, style="SectionTitle.TLabel").pack(anchor="w")
+        if subtitle:
+            ttk.Label(outer, text=subtitle, style="CardMuted.TLabel", wraplength=720).pack(anchor="w", pady=(4, 10))
+        else:
+            ttk.Frame(outer, height=6, style="Card.TFrame").pack()
+        content = ttk.Frame(outer, style="Card.TFrame")
+        content.pack(fill="x")
+        return content
 
     def ui(self, func: Callable[[], None]) -> None:
         def guarded() -> None:
@@ -111,29 +130,30 @@ class LoginPanel(BasePanel):
         self.qr_photo: Any = None
         self.token_var = tk.StringVar()
 
-        ttk.Label(self, text="登录", style="Title.TLabel").pack(anchor="w", pady=(0, 10))
+        self.page_header("登录", "扫码或粘贴 token 后即可开始配置活动。")
         self.status_var = tk.StringVar()
-        ttk.Label(self, textvariable=self.status_var).pack(anchor="w", pady=(0, 10))
+        ttk.Label(self, textvariable=self.status_var, style="Badge.TLabel").pack(anchor="w", pady=(0, 14))
 
-        qr_box = ttk.LabelFrame(self, text="登录二维码", padding=10)
-        qr_box.pack(fill="both", expand=True, pady=(0, 10))
-        self.qr_label = ttk.Label(qr_box, text="点击“生成二维码”开始", anchor="center", justify="center")
+        qr_box = self.section("扫码登录", "二维码有效时间约 2 分钟。手机确认后 token 会自动保存。")
+        row = ttk.Frame(qr_box, style="Card.TFrame")
+        row.pack(fill="x", pady=(0, 10))
+        ttk.Button(row, text="生成二维码", style="Primary.TButton", command=self.start_qr).pack(side="left")
+        ttk.Button(row, text="清空", command=self.clear_qr).pack(side="left", padx=(8, 0))
+
+        qr_area = ttk.Frame(qr_box, style="Card.TFrame", height=320)
+        qr_area.pack(fill="x")
+        qr_area.pack_propagate(False)
+        self.qr_label = ttk.Label(qr_area, text="点击“生成二维码”开始", anchor="center", justify="center", style="Qr.TLabel")
         self.qr_label.pack(fill="both", expand=True)
 
-        row = ttk.Frame(self)
-        row.pack(fill="x", pady=(0, 10))
-        ttk.Button(row, text="生成二维码", command=self.start_qr).pack(side="left")
-        ttk.Button(row, text="清空二维码", command=self.clear_qr).pack(side="left", padx=(8, 0))
-
-        manual = ttk.LabelFrame(self, text="手动输入 Token", padding=10)
-        manual.pack(fill="x")
+        manual = self.section("手动 Token", "用于扫码不方便或需要复用已有登录态的情况。")
         ttk.Entry(manual, textvariable=self.token_var).pack(side="left", fill="x", expand=True)
-        ttk.Button(manual, text="保存 Token", command=self.save_token).pack(side="left", padx=(8, 0))
+        ttk.Button(manual, text="保存 Token", style="Primary.TButton", command=self.save_token).pack(side="left", padx=(8, 0))
         self.refresh_status()
 
     def refresh_status(self) -> None:
         token = self.app.cfg.get("token", "")
-        self.status_var.set(f"已登录：token=…{token[-16:]}" if token else "未登录")
+        self.status_var.set(f"已登录  token=...{token[-16:]}" if token else "未登录")
 
     def clear_qr(self) -> None:
         self.qr_photo = None
@@ -148,6 +168,8 @@ class LoginPanel(BasePanel):
         save_config(self.app.cfg)
         self.refresh_status()
         self.notify("Token 已保存")
+        self.app.warm_cache()
+        self.app.complete_tutorial_step("login")
 
     def start_qr(self) -> None:
         self.qr_label.configure(image="", text="正在创建二维码…")
@@ -162,6 +184,7 @@ class LoginPanel(BasePanel):
             from PIL import ImageTk
 
             image = qr.make_image(fill_color="black", back_color="white").convert("RGB")
+            image.thumbnail((300, 300))
             self.qr_photo = ImageTk.PhotoImage(image)
             self.qr_label.configure(image=self.qr_photo, text="")
         except Exception:
@@ -174,7 +197,8 @@ class LoginPanel(BasePanel):
             code_id, url = api.create_login_qr()
             self.ui(lambda: self._show_qr(url))
         except Exception as exc:
-            self.ui(lambda: messagebox.showerror("创建二维码失败", str(exc)))
+            message = str(exc)
+            self.ui(lambda: messagebox.showerror("创建二维码失败", message))
             return
 
         deadline = time.time() + 120
@@ -191,6 +215,8 @@ class LoginPanel(BasePanel):
                     self.ui(self.refresh_status)
                     self.ui(lambda: self.qr_label.configure(image="", text="登录成功", font=("Microsoft YaHei UI", 14)))
                     self.ui(lambda: self.notify("登录成功"))
+                    self.ui(self.app.warm_cache)
+                    self.ui(lambda: self.app.complete_tutorial_step("login"))
                     return
             except Exception:
                 pass
@@ -201,15 +227,14 @@ class LoginPanel(BasePanel):
 class ConfigPanel(BasePanel):
     def __init__(self, master: tk.Misc, app: "BVGuiApp") -> None:
         super().__init__(master, app)
-        ttk.Label(self, text="配置活动", style="Title.TLabel").pack(anchor="w", pady=(0, 10))
+        self.page_header("配置活动", "按组织、项目、活动、岗位的顺序选择，最后保存配置。")
         self.orgs: list[dict[str, Any]] = []
         self.projects: list[dict[str, Any]] = []
         self.activities: list[dict[str, Any]] = []
         self.posts: list[dict[str, Any]] = []
         self.vars = {key: tk.StringVar(value=self.app.cfg.get(key, "")) for key in ("org_id", "activity_id", "post_id")}
 
-        picker = ttk.LabelFrame(self, text="推荐流程：组织 → 项目 → 活动 → 岗位", padding=12)
-        picker.pack(fill="x", pady=(0, 10))
+        picker = self.section("选择链路", "建议从上到下依次点击获取；选中岗位后会自动回填 ID。")
         self.org_var = tk.StringVar()
         self.project_var = tk.StringVar()
         self.activity_var = tk.StringVar()
@@ -225,18 +250,16 @@ class ConfigPanel(BasePanel):
         self.activity_combo.bind("<<ComboboxSelected>>", lambda _: self.on_activity())
         self.post_combo.bind("<<ComboboxSelected>>", lambda _: self.on_post())
 
-        form = ttk.LabelFrame(self, text="当前配置", padding=12)
-        form.pack(fill="x")
+        form = self.section("当前 ID", "保留手动输入，用于接口异常或临时修正。")
         for row, (key, label) in enumerate((("org_id", "org_id"), ("activity_id", "activity_id"), ("post_id", "post_id"))):
             ttk.Label(form, text=label, width=16).grid(row=row, column=0, sticky="w", pady=5)
             ttk.Entry(form, textvariable=self.vars[key]).grid(row=row, column=1, sticky="ew", pady=5)
         form.grid_columnconfigure(1, weight=1)
 
-        row = ttk.Frame(self)
+        row = ttk.Frame(self, style="Content.TFrame")
         row.pack(fill="x", pady=(10, 0))
-        ttk.Button(row, text="保存配置", command=self.save).pack(side="right")
+        ttk.Button(row, text="保存配置", style="Primary.TButton", command=self.save).pack(side="right")
         ttk.Button(row, text="刷新组织", command=self.load_orgs).pack(side="right", padx=(0, 8))
-        ttk.Label(self, text="选中岗位后会自动回填三个 ID；仍保留手动输入以便应急。", foreground="#666").pack(anchor="w", pady=(10, 0))
 
         if self.app.cfg.get("token"):
             self.after(100, self.load_orgs)
@@ -263,9 +286,51 @@ class ConfigPanel(BasePanel):
         idx = combo.current()
         return items[idx] if 0 <= idx < len(items) else None
 
+    def cached(self, key: str, subkey: str | None = None) -> Any:
+        with self.app.cache_lock:
+            value = self.app.cache[key] if subkey is None else self.app.cache[key].get(subkey)
+        return value
+
+    def fill_orgs(self, orgs: list[dict[str, Any]], default_id: str = "") -> None:
+        self.orgs = orgs
+        self.org_combo.configure(values=[self.label(o, "orgName", "orgId") for o in orgs])
+        if orgs:
+            idx = next((i for i, o in enumerate(orgs) if str(o.get("orgId") or "") == default_id), 0)
+            self.org_combo.current(idx)
+            self.on_org()
+        self.notify(f"已载入 {len(orgs)} 个组织")
+
+    def fill_projects(self, projects: list[dict[str, Any]]) -> None:
+        self.projects = projects
+        self.project_combo.configure(values=[self.label(p, "proName") for p in projects])
+        if projects:
+            self.project_combo.current(0)
+            self.on_project()
+        self.notify(f"已载入 {len(projects)} 个项目")
+
+    def fill_activities(self, activities: list[dict[str, Any]]) -> None:
+        self.activities = activities
+        self.activity_combo.configure(values=[self.label(a, "activityName") for a in activities])
+        if activities:
+            self.activity_combo.current(0)
+            self.on_activity()
+        self.notify(f"已载入 {len(activities)} 个活动")
+
+    def fill_posts(self, posts: list[dict[str, Any]]) -> None:
+        self.posts = posts
+        self.post_combo.configure(values=[self.label(p, "postName") for p in posts])
+        if posts:
+            self.post_combo.current(0)
+            self.on_post()
+        self.notify(f"已载入 {len(posts)} 个岗位")
+
     def load_orgs(self) -> None:
         token = self.token()
         if token:
+            orgs = self.cached("orgs")
+            if orgs is not None:
+                self.fill_orgs(orgs, str(self.cached("default_org_id") or ""))
+                return
             self.notify("正在获取组织")
             self.app.run_bg(lambda: self._load_orgs(token))
 
@@ -275,20 +340,17 @@ class ConfigPanel(BasePanel):
             orgs = data["orgs"]
             default_id = data["defaultOrgId"]
 
+            with self.app.cache_lock:
+                self.app.cache["orgs"] = orgs
+                self.app.cache["default_org_id"] = default_id
+
             def fill() -> None:
-                self.orgs = orgs
-                self.org_combo.configure(values=[self.label(o, "orgName", "orgId") for o in orgs])
-                if orgs:
-                    idx = next((i for i, o in enumerate(orgs) if str(o.get("orgId") or "") == default_id), 0)
-                    self.org_combo.current(idx)
-                    self.on_org()
-                    if len(orgs) == 1:
-                        self.load_projects()
-                self.notify(f"已获取 {len(orgs)} 个组织")
+                self.fill_orgs(orgs, default_id)
 
             self.ui(fill)
         except Exception as exc:
-            self.ui(lambda: messagebox.showerror("获取组织失败", str(exc)))
+            message = str(exc)
+            self.ui(lambda: messagebox.showerror("获取组织失败", message))
 
     def on_org(self) -> None:
         org = self.selected(self.org_combo, self.orgs)
@@ -304,6 +366,9 @@ class ConfigPanel(BasePanel):
         self.project_var.set("")
         self.activity_var.set("")
         self.post_var.set("")
+        cached_projects = self.cached("projects_by_org", self.vars["org_id"].get().strip())
+        if cached_projects is not None:
+            self.fill_projects(cached_projects)
 
     def load_projects(self) -> None:
         token = self.token()
@@ -313,26 +378,26 @@ class ConfigPanel(BasePanel):
         if not org_id:
             messagebox.showwarning("缺少组织", "请先选择组织")
             return
+        cached_projects = self.cached("projects_by_org", org_id)
+        if cached_projects is not None:
+            self.fill_projects(cached_projects)
+            return
         self.notify("正在获取项目")
         self.app.run_bg(lambda: self._load_projects(token, org_id))
 
     def _load_projects(self, token: str, org_id: str) -> None:
         try:
             projects = api.fetch_selectable_projects(token, org_id)
+            with self.app.cache_lock:
+                self.app.cache["projects_by_org"][org_id] = projects
 
             def fill() -> None:
-                self.projects = projects
-                self.project_combo.configure(values=[self.label(p, "proName") for p in projects])
-                if projects:
-                    self.project_combo.current(0)
-                    self.on_project()
-                    if len(projects) == 1:
-                        self.load_activities()
-                self.notify(f"已获取 {len(projects)} 个项目")
+                self.fill_projects(projects)
 
             self.ui(fill)
         except Exception as exc:
-            self.ui(lambda: messagebox.showerror("获取项目失败", str(exc)))
+            message = str(exc)
+            self.ui(lambda: messagebox.showerror("获取项目失败", message))
 
     def on_project(self) -> None:
         self.activities = []
@@ -341,6 +406,11 @@ class ConfigPanel(BasePanel):
         self.post_combo.configure(values=[])
         self.activity_var.set("")
         self.post_var.set("")
+        project = self.selected(self.project_combo, self.projects)
+        if project:
+            cached_activities = self.cached("activities_by_project", str(project.get("iid") or ""))
+            if cached_activities is not None:
+                self.fill_activities(cached_activities)
 
     def load_activities(self) -> None:
         token = self.token()
@@ -350,26 +420,27 @@ class ConfigPanel(BasePanel):
         if not project:
             messagebox.showwarning("缺少项目", "请先选择项目")
             return
+        project_id = str(project.get("iid") or "")
+        cached_activities = self.cached("activities_by_project", project_id)
+        if cached_activities is not None:
+            self.fill_activities(cached_activities)
+            return
         self.notify("正在获取活动")
-        self.app.run_bg(lambda: self._load_activities(token, str(project.get("iid") or "")))
+        self.app.run_bg(lambda: self._load_activities(token, project_id))
 
     def _load_activities(self, token: str, project_id: str) -> None:
         try:
             activities = api.fetch_activities(token, project_id)
+            with self.app.cache_lock:
+                self.app.cache["activities_by_project"][project_id] = activities
 
             def fill() -> None:
-                self.activities = activities
-                self.activity_combo.configure(values=[self.label(a, "activityName") for a in activities])
-                if activities:
-                    self.activity_combo.current(0)
-                    self.on_activity()
-                    if len(activities) == 1:
-                        self.load_posts()
-                self.notify(f"已获取 {len(activities)} 个活动")
+                self.fill_activities(activities)
 
             self.ui(fill)
         except Exception as exc:
-            self.ui(lambda: messagebox.showerror("获取活动失败", str(exc)))
+            message = str(exc)
+            self.ui(lambda: messagebox.showerror("获取活动失败", message))
 
     def on_activity(self) -> None:
         activity = self.selected(self.activity_combo, self.activities)
@@ -378,6 +449,10 @@ class ConfigPanel(BasePanel):
         self.posts = []
         self.post_combo.configure(values=[])
         self.post_var.set("")
+        if activity:
+            cached_posts = self.cached("posts_by_activity", str(activity.get("iid") or ""))
+            if cached_posts is not None:
+                self.fill_posts(cached_posts)
 
     def load_posts(self) -> None:
         token = self.token()
@@ -387,24 +462,26 @@ class ConfigPanel(BasePanel):
         if not activity_id:
             messagebox.showwarning("缺少活动", "请先选择活动")
             return
+        cached_posts = self.cached("posts_by_activity", activity_id)
+        if cached_posts is not None:
+            self.fill_posts(cached_posts)
+            return
         self.notify("正在获取岗位")
         self.app.run_bg(lambda: self._load_posts(token, activity_id))
 
     def _load_posts(self, token: str, activity_id: str) -> None:
         try:
             posts = api.fetch_posts(token, activity_id)
+            with self.app.cache_lock:
+                self.app.cache["posts_by_activity"][activity_id] = posts
 
             def fill() -> None:
-                self.posts = posts
-                self.post_combo.configure(values=[self.label(p, "postName") for p in posts])
-                if posts:
-                    self.post_combo.current(0)
-                    self.on_post()
-                self.notify(f"已获取 {len(posts)} 个岗位")
+                self.fill_posts(posts)
 
             self.ui(fill)
         except Exception as exc:
-            self.ui(lambda: messagebox.showerror("获取岗位失败", str(exc)))
+            message = str(exc)
+            self.ui(lambda: messagebox.showerror("获取岗位失败", message))
 
     def on_post(self) -> None:
         post = self.selected(self.post_combo, self.posts)
@@ -416,6 +493,7 @@ class ConfigPanel(BasePanel):
             self.app.cfg[key] = var.get().strip()
         save_config(self.app.cfg)
         self.notify("配置已保存")
+        self.app.complete_tutorial_step("config")
         messagebox.showinfo("完成", "配置已保存")
 
 
@@ -424,9 +502,11 @@ class RosterPanel(BasePanel):
 
     def __init__(self, master: tk.Misc, app: "BVGuiApp") -> None:
         super().__init__(master, app)
-        ttk.Label(self, text="岗位名单", style="Title.TLabel").pack(anchor="w", pady=(0, 10))
-        ttk.Button(self, text="刷新名单", command=self.refresh).pack(anchor="w", pady=(0, 8))
-        self.table = TreeFrame(self, self.COLUMNS, height=18)
+        self.page_header("岗位名单", "用于核对当前岗位成员，也为批量导入提供已在岗人员兜底。")
+        actions = ttk.Frame(self, style="Content.TFrame")
+        actions.pack(fill="x", pady=(0, 10))
+        ttk.Button(actions, text="刷新名单", style="Primary.TButton", command=self.refresh).pack(side="left")
+        self.table = TreeFrame(self, self.COLUMNS, height=14)
         self.table.pack(fill="both", expand=True)
 
     def refresh(self) -> None:
@@ -447,10 +527,12 @@ class RosterPanel(BasePanel):
                 for i, user in enumerate(roster, 1):
                     self.table.add_row((i, user.get("nameSensitive", ""), user.get("uid", ""), user.get("userNumber", ""), user.get("approvedTime", "")))
                 self.notify(f"已加载 {len(roster)} 人")
+                self.app.complete_tutorial_step("roster")
 
             self.ui(fill)
         except Exception as exc:
-            self.ui(lambda: messagebox.showerror("加载失败", str(exc)))
+            message = str(exc)
+            self.ui(lambda: messagebox.showerror("加载失败", message))
 
 
 class ImportPanel(BasePanel):
@@ -458,16 +540,14 @@ class ImportPanel(BasePanel):
 
     def __init__(self, master: tk.Misc, app: "BVGuiApp") -> None:
         super().__init__(master, app)
-        ttk.Label(self, text="Excel 批量导入", style="Title.TLabel").pack(anchor="w", pady=(0, 10))
+        self.page_header("Excel 批量导入", "加载表格后先预览分配计划，再执行入岗和时数录入。")
         self.path_var = tk.StringVar()
-        file_box = ttk.LabelFrame(self, text="文件", padding=10)
-        file_box.pack(fill="x", pady=(0, 8))
+        file_box = self.section("1. 选择文件", "支持 .xls 和 .xlsx；表头至少包含姓名和时数。")
         ttk.Entry(file_box, textvariable=self.path_var).pack(side="left", fill="x", expand=True)
         ttk.Button(file_box, text="浏览", command=self.browse).pack(side="left", padx=(8, 0))
-        ttk.Button(file_box, text="加载", command=self.load_file).pack(side="left", padx=(8, 0))
+        ttk.Button(file_box, text="加载", style="Primary.TButton", command=self.load_file).pack(side="left", padx=(8, 0))
 
-        options = ttk.LabelFrame(self, text="录入参数", padding=10)
-        options.pack(fill="x", pady=(0, 8))
+        options = self.section("2. 录入参数", "时数超过每日上限时，会自动顺延到后续日期。")
         self.start_var = tk.StringVar(value=date.today().isoformat())
         self.max_var = tk.StringVar(value="8")
         ttk.Label(options, text="起始日期").pack(side="left")
@@ -475,14 +555,17 @@ class ImportPanel(BasePanel):
         ttk.Label(options, text="每日最大小时").pack(side="left")
         ttk.Entry(options, textvariable=self.max_var, width=8).pack(side="left", padx=(6, 0))
 
-        self.table = TreeFrame(self, self.COLUMNS, height=12)
-        self.table.pack(fill="both", expand=True, pady=(0, 8))
-        actions = ttk.Frame(self)
-        actions.pack(fill="x", pady=(0, 8))
+        actions = ttk.Frame(self, style="Content.TFrame")
+        actions.pack(side="bottom", fill="x", pady=(8, 0))
         ttk.Button(actions, text="仅预览", command=self.preview).pack(side="left")
-        ttk.Button(actions, text="开始全流程", command=self.run_pipeline).pack(side="left", padx=(8, 0))
-        self.log = ScrolledText(self, height=10)
-        self.log.pack(fill="both", expand=True)
+        ttk.Button(actions, text="开始全流程", style="Primary.TButton", command=self.run_pipeline).pack(side="left", padx=(8, 0))
+
+        work_area = ttk.Frame(self, style="Content.TFrame")
+        work_area.pack(fill="both", expand=True)
+        self.table = TreeFrame(work_area, self.COLUMNS, height=7)
+        self.table.pack(fill="both", expand=True, pady=(0, 8))
+        self.log = ScrolledText(work_area, height=5)
+        self.log.pack(fill="x")
 
     def browse(self) -> None:
         path = filedialog.askopenfilename(title="选择 Excel 文件", filetypes=[("Excel files", "*.xls *.xlsx"), ("All files", "*.*")])
@@ -510,10 +593,23 @@ class ImportPanel(BasePanel):
                 self.log.clear()
                 self.log.write_line(f"已加载 {len(rows)} 行：{Path(path).name}")
                 self.notify(f"已加载 {len(rows)} 行")
+                self.app.complete_tutorial_step("import")
 
             self.ui(fill)
         except Exception as exc:
-            self.ui(lambda: messagebox.showerror("读取失败", str(exc)))
+            message = str(exc)
+
+            def show_error() -> None:
+                self.app.import_rows = []
+                self.table.clear()
+                self.table.add_row(("", "", "", "-", "-", "-", f"读取失败：{message}"))
+                self.log.clear()
+                self.log.write_line(f"读取失败：{Path(path).name}")
+                self.log.write_line(message)
+                self.notify("Excel 读取失败")
+                messagebox.showerror("读取失败", message)
+
+            self.ui(show_error)
 
     def options(self) -> tuple[date, float]:
         start = date.fromisoformat(self.start_var.get().strip())
@@ -537,6 +633,7 @@ class ImportPanel(BasePanel):
             cert = "有身份证/证件号" if row.cert_no else "无身份证/证件号"
             self.log.write_line(f"{row.name} {row.hours:g}h -> {plan} ({cert})")
         self.notify("预览完成")
+        self.app.complete_tutorial_step("import")
 
     def run_pipeline(self) -> None:
         cfg = self.app.cfg
@@ -663,6 +760,123 @@ class ImportPanel(BasePanel):
                 set_cell(i, "时数录入", "失败")
                 set_cell(i, "状态", str(exc))
         self.ui(lambda: self.notify("全流程完成"))
+        self.ui(lambda: self.app.complete_tutorial_step("import"))
+
+
+class TutorialWindow(tk.Toplevel):
+    STEPS = (
+        (
+            "1. 登录",
+            "扫码登录最省心；如果已有 accessToken，也可以在登录页手动粘贴保存。登录状态会保存在本机配置里。",
+            "login",
+        ),
+        (
+            "2. 配置活动",
+            "按组织、项目、活动、岗位的顺序获取。选中岗位后，系统会自动回填 org_id、activity_id 和 post_id。",
+            "config",
+        ),
+        (
+            "3. 核对岗位名单",
+            "名单页用于确认当前岗位已有成员。批量导入时，如果组织搜索找不到但人已在岗位里，会用这份名单兜底匹配。",
+            "roster",
+        ),
+        (
+            "4. 导入 Excel",
+            "加载表格后先点“仅预览”，确认日期和每日上限无误，再点“开始全流程”。表格建议包含身份证号以减少重名风险。",
+            "import",
+        ),
+        (
+            "5. 看状态和日志",
+            "表格列会显示组织搜索、入岗、时数录入的每一步结果。底部深色日志区保留更详细的处理记录。",
+            "import",
+        ),
+    )
+
+    def __init__(self, app: "BVGuiApp", auto: bool = False) -> None:
+        super().__init__(app)
+        self.app = app
+        self.auto = auto
+        self.index = 0
+        self.title("快速引导")
+        self.geometry("620x360")
+        self.minsize(560, 330)
+        self.transient(app)
+        self.configure(background="#F8FAFC")
+        self.protocol("WM_DELETE_WINDOW", self.dismiss)
+
+        outer = ttk.Frame(self, style="Content.TFrame", padding=(18, 16))
+        outer.pack(fill="both", expand=True)
+        ttk.Label(outer, text="快速引导", style="PageTitle.TLabel").pack(anchor="w")
+        ttk.Label(outer, text="完成当前步骤后，向导会自动推进；也可以手动切换。", style="Muted.TLabel").pack(anchor="w", pady=(5, 12))
+
+        body = ttk.Frame(outer, style="Card.TFrame", padding=(18, 14))
+        body.pack(fill="both", expand=True)
+        self.step_var = tk.StringVar()
+        self.title_var = tk.StringVar()
+        self.body_var = tk.StringVar()
+        self.hint_var = tk.StringVar()
+        ttk.Label(body, textvariable=self.step_var, style="Badge.TLabel").pack(anchor="w")
+        ttk.Label(body, textvariable=self.title_var, style="GuideTitle.TLabel").pack(anchor="w", pady=(14, 8))
+        ttk.Label(body, textvariable=self.body_var, style="GuideBody.TLabel", wraplength=520, justify="left").pack(anchor="w", fill="x")
+        ttk.Label(body, textvariable=self.hint_var, style="CardMuted.TLabel", wraplength=520, justify="left").pack(anchor="w", fill="x", pady=(14, 0))
+
+        controls = ttk.Frame(outer, style="Content.TFrame")
+        controls.pack(fill="x", pady=(16, 0))
+        self.back_btn = ttk.Button(controls, text="上一步", command=self.prev_step)
+        self.back_btn.pack(side="left")
+        self.jump_btn = ttk.Button(controls, text="打开此页面", command=self.jump_to_panel)
+        self.jump_btn.pack(side="left", padx=(8, 0))
+        self.next_btn = ttk.Button(controls, text="下一步", style="Primary.TButton", command=self.next_step)
+        self.next_btn.pack(side="right")
+        ttk.Button(controls, text="完成", command=self.close).pack(side="right", padx=(0, 8))
+        self.render()
+
+    def render(self) -> None:
+        title, body, _panel = self.STEPS[self.index]
+        self.step_var.set(f"{self.index + 1} / {len(self.STEPS)}")
+        self.title_var.set(title)
+        self.body_var.set(body)
+        self.hint_var.set("等待你完成这一步。完成后会自动进入下一步。")
+        self.back_btn.configure(state="normal" if self.index else "disabled")
+        self.next_btn.configure(text="完成" if self.index == len(self.STEPS) - 1 else "下一步")
+
+    def prev_step(self) -> None:
+        if self.index > 0:
+            self.index -= 1
+            self.render()
+            self.jump_to_panel()
+
+    def next_step(self) -> None:
+        if self.index >= len(self.STEPS) - 1:
+            self.close()
+            return
+        self.index += 1
+        self.render()
+        self.jump_to_panel()
+
+    def jump_to_panel(self) -> None:
+        _title, _body, panel = self.STEPS[self.index]
+        self.app.show_panel(panel)
+
+    def complete_panel(self, panel: str) -> None:
+        _title, _body, expected_panel = self.STEPS[self.index]
+        if panel != expected_panel:
+            return
+        self.hint_var.set("已完成，正在进入下一步…")
+        if self.index >= len(self.STEPS) - 1:
+            self.after(650, self.close)
+        else:
+            self.after(650, self.next_step)
+
+    def close(self) -> None:
+        self.app.cfg["tutorial_seen"] = "1"
+        save_config(self.app.cfg)
+        self.app.refresh_tutorial_button()
+        self.dismiss()
+
+    def dismiss(self) -> None:
+        self.app.tutorial_window = None
+        self.destroy()
 
 
 class HelpPanel:
@@ -736,14 +950,27 @@ class BVGuiApp(tk.Tk):
         self.ui_queue: queue.Queue[Callable[[], None]] = queue.Queue()
         self.nav_buttons: dict[str, ttk.Button] = {}
         self.current_panel: BasePanel | None = None
+        self.tutorial_window: TutorialWindow | None = None
+        self.tutorial_button: ttk.Button | None = None
+        self.page_title_var = tk.StringVar(value="登录")
+        self.cache: dict[str, Any] = {
+            "orgs": None,
+            "default_org_id": "",
+            "projects_by_org": {},
+            "activities_by_project": {},
+            "posts_by_activity": {},
+        }
+        self.cache_lock = threading.Lock()
         self.title("bv2008 志愿者管理工具")
-        self.geometry("1120x720")
-        self.minsize(960, 600)
+        self.geometry("1080x660")
+        self.minsize(900, 560)
         self.setup_style()
         self.build_menu()
         self.build_layout()
         self.show_panel("login")
         self.after(80, self.process_ui)
+        self.after(250, self.warm_cache)
+        self.after(550, self.maybe_show_tutorial)
 
     def setup_style(self) -> None:
         style = ttk.Style(self)
@@ -752,10 +979,35 @@ class BVGuiApp(tk.Tk):
                 style.theme_use(theme)
                 break
         self.option_add("*Font", ("Microsoft YaHei UI", 9))
-        style.configure("Title.TLabel", font=("Microsoft YaHei UI", 14, "bold"))
-        style.configure("Nav.TButton", anchor="w", padding=(12, 8))
-        style.configure("Active.Nav.TButton", anchor="w", padding=(12, 8))
-        style.configure("Treeview", rowheight=26)
+        style.configure(".", background="#F8FAFC", foreground="#111827")
+        style.configure("App.TFrame", background="#F8FAFC")
+        style.configure("Content.TFrame", background="#F8FAFC")
+        style.configure("Sidebar.TFrame", background="#111827")
+        style.configure("Header.TFrame", background="#FFFFFF")
+        style.configure("Card.TFrame", background="#FFFFFF", relief="flat", borderwidth=0)
+        style.configure("Panel.TFrame", background="#FFFFFF")
+        style.configure("Status.TFrame", background="#EEF2F7")
+        style.configure("Title.TLabel", font=("Microsoft YaHei UI", 14, "bold"), background="#F8FAFC", foreground="#111827")
+        style.configure("PageTitle.TLabel", font=("Microsoft YaHei UI", 16, "bold"), background="#F8FAFC", foreground="#111827")
+        style.configure("SectionTitle.TLabel", font=("Microsoft YaHei UI", 11, "bold"), background="#FFFFFF", foreground="#111827")
+        style.configure("Muted.TLabel", background="#F8FAFC", foreground="#475569")
+        style.configure("CardMuted.TLabel", background="#FFFFFF", foreground="#475569")
+        style.configure("Badge.TLabel", background="#FEE2E2", foreground="#8A1F1F", padding=(10, 4), font=("Microsoft YaHei UI", 9, "bold"))
+        style.configure("Qr.TLabel", background="#FFFFFF", foreground="#64748B", font=("Microsoft YaHei UI", 12))
+        style.configure("GuideTitle.TLabel", font=("Microsoft YaHei UI", 15, "bold"), background="#FFFFFF", foreground="#111827")
+        style.configure("GuideBody.TLabel", font=("Microsoft YaHei UI", 10), background="#FFFFFF", foreground="#334155")
+        style.configure("Brand.TLabel", font=("Microsoft YaHei UI", 17, "bold"), background="#111827", foreground="#FFFFFF")
+        style.configure("SidebarMuted.TLabel", background="#111827", foreground="#94A3B8")
+        style.configure("HeaderTitle.TLabel", font=("Microsoft YaHei UI", 13, "bold"), background="#FFFFFF", foreground="#111827")
+        style.configure("Status.TLabel", background="#EEF2F7", foreground="#475569")
+        style.configure("Nav.TButton", anchor="w", padding=(14, 10), foreground="#111827")
+        style.configure("Active.Nav.TButton", anchor="w", padding=(14, 10), foreground="#8A1F1F")
+        style.configure("Primary.TButton", padding=(12, 5), foreground="#111827")
+        style.map("Primary.TButton", foreground=[("disabled", "#6B7280"), ("active", "#111827"), ("pressed", "#111827")])
+        style.map("Nav.TButton", foreground=[("disabled", "#6B7280"), ("active", "#111827"), ("pressed", "#111827")])
+        style.map("Active.Nav.TButton", foreground=[("disabled", "#6B7280"), ("active", "#8A1F1F"), ("pressed", "#8A1F1F")])
+        style.configure("Treeview", rowheight=28, background="#FFFFFF", fieldbackground="#FFFFFF", borderwidth=0)
+        style.configure("Treeview.Heading", font=("Microsoft YaHei UI", 9, "bold"), background="#EEF2F7", foreground="#334155")
 
     def build_menu(self) -> None:
         menu = tk.Menu(self)
@@ -767,28 +1019,36 @@ class BVGuiApp(tk.Tk):
             view_menu.add_command(label=label, command=lambda k=key: self.show_panel(k))
         menu.add_cascade(label="视图", menu=view_menu)
         help_menu = tk.Menu(menu, tearoff=False)
+        help_menu.add_command(label="重放引导教程", command=lambda: self.show_tutorial(auto=False))
         help_menu.add_command(label="帮助与关于", command=lambda: HelpPanel.show(self))
         menu.add_cascade(label="帮助", menu=help_menu)
         self.configure(menu=menu)
         self.bind_all("<Control-q>", lambda _event: self.destroy())
 
     def build_layout(self) -> None:
-        root = ttk.Frame(self)
+        root = ttk.Frame(self, style="App.TFrame")
         root.pack(fill="both", expand=True)
-        toolbar = ttk.Frame(root, padding=(8, 6))
+        toolbar = ttk.Frame(root, style="Header.TFrame", padding=(14, 9))
         toolbar.pack(side="top", fill="x")
-        ttk.Label(toolbar, text="bv2008 · 中国人民大学商学院青年志愿者协会", font=("Microsoft YaHei UI", 11, "bold")).pack(side="left")
-        ttk.Separator(root, orient="horizontal").pack(side="top", fill="x")
+        left = ttk.Frame(toolbar, style="Header.TFrame")
+        left.pack(side="left", fill="x", expand=True)
+        ttk.Label(left, textvariable=self.page_title_var, style="HeaderTitle.TLabel").pack(anchor="w")
+        ttk.Label(left, text="中国人民大学商学院青年志愿者协会", style="CardMuted.TLabel").pack(anchor="w", pady=(2, 0))
+        self.tutorial_button = ttk.Button(toolbar, text="重放教程", command=lambda: self.show_tutorial(auto=False))
+        self.refresh_tutorial_button()
         body = ttk.PanedWindow(root, orient="horizontal")
         body.pack(side="top", fill="both", expand=True)
-        sidebar = ttk.Frame(body, padding=(10, 12))
+        sidebar = ttk.Frame(body, style="Sidebar.TFrame", padding=(14, 16), width=190)
         body.add(sidebar, weight=0)
-        ttk.Label(sidebar, text="bv2008", style="Title.TLabel").pack(anchor="w", pady=(0, 16))
+        sidebar.pack_propagate(False)
+        ttk.Label(sidebar, text="bv2008", style="Brand.TLabel").pack(anchor="w")
+        ttk.Label(sidebar, text="志愿服务录入工作台", style="SidebarMuted.TLabel").pack(anchor="w", pady=(4, 20))
         for key, label in self.NAV_ITEMS:
             button = ttk.Button(sidebar, text=label, style="Nav.TButton", command=lambda k=key: self.show_panel(k))
             button.pack(fill="x", pady=3)
             self.nav_buttons[key] = button
-        self.content = ttk.Frame(body)
+        ttk.Label(sidebar, text="建议流程：登录 → 配置 → 导入 → 核对", style="SidebarMuted.TLabel", wraplength=170).pack(side="bottom", anchor="w", pady=(20, 0))
+        self.content = ttk.Frame(body, style="Content.TFrame")
         body.add(self.content, weight=1)
         self.status = StatusBar(root)
         self.status.pack(side="bottom", fill="x")
@@ -799,9 +1059,77 @@ class BVGuiApp(tk.Tk):
             child.destroy()
         self.current_panel = panel_class(self.content, self)
         self.current_panel.pack(fill="both", expand=True)
+        labels = dict(self.NAV_ITEMS)
         for key, button in self.nav_buttons.items():
             button.configure(style="Active.Nav.TButton" if key == name else "Nav.TButton")
-        self.status.set(dict(self.NAV_ITEMS).get(name, "就绪"))
+            button.configure(text=(f"● {labels[key]}" if key == name else labels[key]))
+        label = labels.get(name, "就绪")
+        self.page_title_var.set(label)
+        self.status.set(label)
+
+    def maybe_show_tutorial(self) -> None:
+        if self.cfg.get("tutorial_seen") != "1":
+            self.show_tutorial(auto=True)
+
+    def refresh_tutorial_button(self) -> None:
+        if self.tutorial_button is None:
+            return
+        if self.cfg.get("tutorial_seen") == "1":
+            self.tutorial_button.pack_forget()
+        elif not self.tutorial_button.winfo_ismapped():
+            self.tutorial_button.pack(side="right")
+
+    def show_tutorial(self, auto: bool = False) -> None:
+        if self.tutorial_window is not None and self.tutorial_window.winfo_exists():
+            self.tutorial_window.lift()
+            self.tutorial_window.focus_force()
+            return
+        self.tutorial_window = TutorialWindow(self, auto=auto)
+
+    def complete_tutorial_step(self, panel: str) -> None:
+        if self.tutorial_window is not None and self.tutorial_window.winfo_exists():
+            self.tutorial_window.complete_panel(panel)
+
+    def warm_cache(self) -> None:
+        token = self.cfg.get("token", "")
+        if token:
+            self.run_bg(lambda: self._warm_cache_worker(token))
+
+    def _warm_cache_worker(self, token: str) -> None:
+        try:
+            self.ui(lambda: self.status.set("正在后台缓存组织和活动数据…"))
+            data = api.fetch_current_orgs(token)
+            orgs = data["orgs"]
+            default_org_id = str(data.get("defaultOrgId") or "")
+            with self.cache_lock:
+                self.cache["orgs"] = orgs
+                self.cache["default_org_id"] = default_org_id
+
+            for org in orgs:
+                org_id = str(org.get("orgId") or "")
+                if not org_id:
+                    continue
+                projects = api.fetch_selectable_projects(token, org_id)
+                with self.cache_lock:
+                    self.cache["projects_by_org"][org_id] = projects
+                for project in projects:
+                    project_id = str(project.get("iid") or "")
+                    if not project_id:
+                        continue
+                    activities = api.fetch_activities(token, project_id)
+                    with self.cache_lock:
+                        self.cache["activities_by_project"][project_id] = activities
+                    for activity in activities:
+                        activity_id = str(activity.get("iid") or "")
+                        if not activity_id:
+                            continue
+                        posts = api.fetch_posts(token, activity_id)
+                        with self.cache_lock:
+                            self.cache["posts_by_activity"][activity_id] = posts
+            self.ui(lambda: self.status.set("后台缓存完成"))
+        except Exception as exc:
+            message = str(exc)
+            self.ui(lambda: self.status.set(f"后台缓存失败：{message}"))
 
     def ui(self, func: Callable[[], None]) -> None:
         self.ui_queue.put(func)
