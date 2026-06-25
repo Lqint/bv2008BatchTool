@@ -26,6 +26,24 @@ class PostInfo:
     raw: dict
 
 
+@dataclass
+class ActivityDetails:
+    activity_name: str
+    server_time: list[str]
+    start_time: str
+    end_time: str
+
+
+@dataclass
+class RecruitedVolunteer:
+    uid: str
+    iid: str
+    encrypted_name: str
+    name_sensitive: str
+    post_id: str
+    post_name: str
+
+
 class AmbiguousUserError(RuntimeError):
     def __init__(self, name: str, count: int):
         super().__init__(f"姓名 {name} 匹配到 {count} 人，请补充身份证号后重试")
@@ -207,6 +225,70 @@ class BVApi:
             if "人员已经在此活动中" not in str(exc):
                 raise RuntimeError(f"加入岗位失败：{exc}")
 
+    def find_activity_details(self, activity_id: str) -> ActivityDetails:
+        """Get activity details including serverTime date list."""
+        data = unwrap_success(self.call("findDetailsByIid", {"iid": activity_id}))
+        details = data.get("resultData", {}).get("dataMap", {}).get("details", {})
+        server_time_str = details.get("serverTime", "")
+        server_time = [d.strip() for d in server_time_str.split(",") if d.strip()] if server_time_str else []
+        return ActivityDetails(
+            activity_name=details.get("activityName", ""),
+            server_time=server_time,
+            start_time=details.get("startTime", ""),
+            end_time=details.get("endTime", ""),
+        )
+
+    def find_formal_member(self, name: str) -> list[dict]:
+        """Search group members by plaintext name (no encryption needed).
+
+        Returns list of member dicts with keys: iid, uid, name (masked), userNumber, etc.
+        """
+        biz = {
+            "name": name,
+            "loginName": "",
+            "regionLabel": "",
+            "regionCode": "",
+            "pageNo": 1,
+            "pageSize": 50,
+        }
+        data = unwrap_success(self.call("findFormalMember", biz))
+        return data.get("resultData", {}).get("dataList", [])
+
+    def find_recruited_volunteers(self, activity_id: str, post_id: str) -> list[RecruitedVolunteer]:
+        """Query volunteers already recruited in a specific post (handles pagination)."""
+        all_rows: list[dict] = []
+        page_no = 1
+        page_size = 50  # platform max
+        while True:
+            biz = {
+                "pageNo": page_no,
+                "pageSize": page_size,
+                "state": "5",
+                "activityId": activity_id,
+                "postId": post_id,
+            }
+            resp = self.call("findRecruitVolunteerList", biz)
+            data = unwrap_success(resp)
+            result_data = data.get("resultData", {})
+            rows = result_data.get("dataList", [])
+            total = result_data.get("totalCount", 0)
+            all_rows.extend(rows)
+            if page_no * page_size >= total:
+                break
+            page_no += 1
+        return [
+            RecruitedVolunteer(
+                uid=str(row.get("uid", "")),
+                iid=str(row.get("iid", "")),
+                encrypted_name=str(row.get("name", "")),
+                name_sensitive=str(row.get("nameSensitive", "")),
+                post_id=post_id,
+                post_name="",
+            )
+            for row in all_rows
+            if row.get("uid")
+        ]
+
     def upload_proof(self, filename: str | None, data: bytes | None, mime: str | None = None) -> str:
         if not data:
             filename = "proof.png"
@@ -248,3 +330,21 @@ class BVApi:
             "filePath": file_path,
         }
         return unwrap_success(self.call("activityTiming-batchAdd", biz))
+
+
+def fetch_all_recruited(api: BVApi, activity_id: str, posts: list[PostInfo]) -> list[RecruitedVolunteer]:
+    """Fetch recruited volunteers across all posts.
+
+    Returns a flat list with post_name populated on each entry.
+    """
+    all_list: list[RecruitedVolunteer] = []
+    for post in posts:
+        try:
+            volunteers = api.find_recruited_volunteers(activity_id, post.post_id)
+            for v in volunteers:
+                v.post_name = post.name
+            all_list.extend(volunteers)
+        except Exception:
+            # If one post query fails, continue with others
+            pass
+    return all_list

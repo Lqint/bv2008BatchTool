@@ -19,7 +19,7 @@
 上传文件必须是 `.xlsx`，第一行表头必须包含：
 
 ```text
-姓名、身份证号（选填）、岗位、时长、备注（选填）
+姓名、身份证号、岗位、时长、备注（选填）
 ```
 
 说明：
@@ -37,20 +37,22 @@
 每一行按以下顺序执行：
 
 ```text
-activityUser-findOrgUserList（姓名+身份证号，或仅姓名，postId 固定传 1）
-  → 找不到且有身份证号：addMember 加入团体，再重新查询
-  → addMember 返回“该用户已加入团体”时视为成功
-  → 找不到且无身份证号：跳过并写入原因
-  → 查询到多人：跳过并提示补充身份证号
-  → activityUser-addList 加入岗位
-  → 检查起始日期到今天是否足够容纳时长（每天最多 10 小时）
-  → zybj_uploadFile 上传证明图
-  → activityTiming-batchAdd 录入时数
+activityUser-findOrgUserList（姓名+身份证号，或仅姓名）
+  → 找到：activityUser-addList 加入岗位 → 录时长
+  → 找不到且有身份证号：addMember 加入团体 → 重试 findOrgUserList
+    → 找到：activityUser-addList 加入岗位 → 录时长
+    → 仍找不到或 addMember 失败（已入团）：findFormalMember 按姓名查团体成员
+      → 匹配到多人：跳过并提示手动确认
+      → 匹配到一人：取 uid，在已入岗名单中查找
+        → 在目标岗位中：直接录时长
+        → 在其他岗位中：跳过并提示兼项
+        → 不在任何岗位：加入岗位 → 录时长
+  → 找不到且无身份证号：findFormalMember 按姓名查团体成员（同上）
+  → 找不到且 findFormalMember 也查不到：跳过并写入原因
+  → findOrgUserList 查到多人：跳过并提示补充身份证号
 ```
 
-注意：`activityTiming-batchAdd` 不校验成员是否已入岗，所以本工具始终先执行 `activityUser-addList`，避免时长记录和岗位名单不一致。
-
-`findOrgUserList` 在本工具中用于查询志愿者 uid。为避免具体岗位过滤导致已在岗志愿者查不到，查询 uid 时 `postId` 固定传 `1`；真正加入岗位和录入时长时仍使用表格岗位匹配到的真实岗位 ID。
+注意：不在岗的志愿者通过 findOrgUserList 查找；已在岗的通过 findFormalMember → 招募名单匹配定位。
 
 ## 本地运行
 

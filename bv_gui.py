@@ -11,11 +11,11 @@ from pathlib import Path
 
 from openpyxl import Workbook
 import qrcode
-from PySide6.QtCore import QDate, QObject, Qt, QThread, QTimer, Signal
+from PySide6.QtCore import QObject, Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QApplication,
-    QDateEdit,
+    QComboBox,
     QFileDialog,
     QGridLayout,
     QGroupBox,
@@ -31,7 +31,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from bv_api import BVApi, PostInfo
+from bv_api import BVApi, PostInfo, ActivityDetails
 from bv_batch_runner import BatchConfig, REQUIRED_HEADERS, result_output_path, run_batch
 
 
@@ -90,6 +90,20 @@ class PostsWorker(Worker):
             self.failed.emit(str(exc))
 
 
+class ActivityDetailsWorker(Worker):
+    def __init__(self, token: str, activity_id: str):
+        super().__init__()
+        self.token = token
+        self.activity_id = activity_id
+
+    def run(self) -> None:
+        try:
+            details = BVApi(self.token).find_activity_details(self.activity_id)
+            self.finished.emit(details)
+        except Exception as exc:
+            self.failed.emit(str(exc))
+
+
 class BatchWorker(Worker):
     progress = Signal(str)
 
@@ -109,10 +123,11 @@ class BatchWorker(Worker):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("志愿北京时长批量录入v2")
+        self.setWindowTitle("志愿北京时长批量录入v3")
         self.resize(1100, 760)
 
         self.posts: list[PostInfo] = []
+        self.activity_dates: list[str] = []
         self.xlsx_path: Path | None = None
         self.proof_path: Path | None = None
         self.active_threads: list[QThread] = []
@@ -124,9 +139,11 @@ class MainWindow(QMainWindow):
         self.org_input = QLineEdit()
         self.xlsx_label = QLabel("未选择")
         self.proof_label = QLabel("未选择，将使用 1x1 PNG 占位图")
-        self.date_input = QDateEdit(QDate.currentDate())
-        self.date_input.setCalendarPopup(True)
+        self.date_combo = QComboBox()
+        self.date_combo.setEnabled(False)
+        self.date_combo.setPlaceholderText("请先获取活动信息")
         self.post_list = QListWidget()
+        self.post_list.setStyleSheet("font-size: 15px;")
         self.qr_label = QLabel("点击按钮生成二维码")
         self.qr_label.setAlignment(Qt.AlignCenter)
         self.qr_label.setMinimumSize(220, 220)
@@ -163,11 +180,11 @@ class MainWindow(QMainWindow):
 
         activity_box = QGroupBox("2. 活动与岗位")
         activity_layout = QVBoxLayout(activity_box)
-        activity_layout.addWidget(QLabel("活动 ID"))
-        activity_layout.addWidget(self.activity_input)
         activity_layout.addWidget(QLabel("组织 ID"))
         activity_layout.addWidget(self.org_input)
-        fetch_btn = QPushButton("获取岗位信息")
+        activity_layout.addWidget(QLabel("活动 ID"))
+        activity_layout.addWidget(self.activity_input)
+        fetch_btn = QPushButton("获取岗位和活动日期")
         fetch_btn.clicked.connect(self.fetch_posts)
         activity_layout.addWidget(fetch_btn)
         left.addWidget(activity_box)
@@ -187,8 +204,8 @@ class MainWindow(QMainWindow):
         upload_layout.addWidget(self.xlsx_label)
         upload_layout.addWidget(proof_btn)
         upload_layout.addWidget(self.proof_label)
-        upload_layout.addWidget(QLabel("志愿录入起始日期（请对齐活动日期）"))
-        upload_layout.addWidget(self.date_input)
+        upload_layout.addWidget(QLabel("志愿录入起始日期（从活动日期列表中选择）"))
+        upload_layout.addWidget(self.date_combo)
         left.addWidget(upload_box)
 
         self.start_button.clicked.connect(self.start_batch)
@@ -196,6 +213,7 @@ class MainWindow(QMainWindow):
         left.addStretch(1)
 
         notice_bar = QHBoxLayout()
+        notice_bar.setContentsMargins(0, 0, 0, 0)
         notice_bar.addStretch(1)
         self.notice_button.clicked.connect(self.show_start_notice)
         notice_bar.addWidget(self.notice_button)
@@ -219,7 +237,7 @@ class MainWindow(QMainWindow):
             QWidget { background: rgb(248, 244, 238); }
             QGroupBox { border: 1px solid #d8cfc4; border-radius: 6px; margin-top: 10px; padding: 10px; background: #fffdfa; }
             QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 4px; color: #2f2523; font-weight: 600; }
-            QLineEdit, QDateEdit, QPlainTextEdit, QListWidget { border: 1px solid #d1c7bb; border-radius: 4px; padding: 6px; background: #ffffff; color: #2f2523; }
+            QLineEdit, QComboBox, QPlainTextEdit, QListWidget { border: 1px solid #d1c7bb; border-radius: 4px; padding: 6px; background: #ffffff; color: #2f2523; }
             QPushButton { border: 1px solid rgb(174, 11, 42); border-radius: 4px; padding: 8px 10px; color: #ffffff; background: rgb(174, 11, 42); font-weight: 600; }
             QPushButton:hover { background: #8f0924; border-color: #8f0924; }
             QPushButton:disabled { background: #b8aaa9; border-color: #b8aaa9; }
@@ -287,7 +305,7 @@ class MainWindow(QMainWindow):
         if not token or not activity_id or not org_id:
             self.show_error("请先填写 TOKEN、活动 ID 和组织 ID")
             return
-        self.append_log("正在获取岗位列表...")
+        self.append_log("正在获取岗位信息和活动详情...")
         self.run_worker(PostsWorker(token, activity_id, org_id), self.on_posts_loaded)
 
     def on_posts_loaded(self, posts: list[PostInfo]) -> None:
@@ -296,6 +314,33 @@ class MainWindow(QMainWindow):
         for post in posts:
             self.post_list.addItem(post.name)
         self.append_log(f"已获取 {len(posts)} 个岗位")
+        # Also fetch activity details for date list
+        token = self.token_input.text().strip()
+        activity_id = self.activity_input.text().strip()
+        if token and activity_id:
+            self.run_worker(ActivityDetailsWorker(token, activity_id), self.on_details_loaded)
+
+    def on_details_loaded(self, details: ActivityDetails) -> None:
+        self.date_combo.clear()
+        if details.server_time:
+            # Filter: only keep dates <= today
+            today_str = date.today().isoformat()
+            valid_dates = [d for d in details.server_time if d <= today_str]
+            if valid_dates:
+                self.date_combo.addItems(valid_dates)
+                self.date_combo.setEnabled(True)
+                self.activity_dates = valid_dates
+                self.append_log(f"已获取活动日期：{len(valid_dates)} 天可用（已过滤未来日期）")
+            else:
+                self.date_combo.setEnabled(False)
+                self.date_combo.setPlaceholderText("无可用活动日期（均在将来）")
+                self.activity_dates = []
+                self.append_log("警告：活动日期均晚于今天，无法录入")
+        else:
+            self.date_combo.setEnabled(False)
+            self.date_combo.setPlaceholderText("活动无可用日期")
+            self.activity_dates = []
+            self.append_log("警告：未获取到活动日期")
 
     def select_xlsx(self) -> None:
         path, _ = QFileDialog.getOpenFileName(self, "选择 xlsx 表格", "", "Excel Workbook (*.xlsx)")
@@ -346,27 +391,32 @@ class MainWindow(QMainWindow):
         QMessageBox.information(self, "配套文档已保存", f"配套文档已保存至：\n{output}")
 
     def show_start_notice(self) -> None:
+        red = '<span style="color:red">'
+        end = "</span>"
+
+        def _p(text: str) -> str:
+            return "<p>" + text + "</p>"
+
         notice = (
-            "使用本工具前，请您仔细阅读下面的通知：\n\n"
-            "1. 本工具用于“志愿北京”新版平台的志愿时长批量录入，旨在方便青协同学处理工作。请仅在自己负责的组织、合规的志愿者管理流程中使用；因未授权、误用或不当使用造成的后果，由使用者自行承担，开发者不承担相关责任。\n\n"
-            "2. 本工具为 v2 版本，后续可能仍会更新。请在使用前确认当前程序为最新版本。\n\n"
-            "3. 本工具链路：根据姓名和身份证号(如有)在团体内查询志愿者id->若未查到且已填写身份证号，将其加入团体->使用uid加入对应岗位->录入志愿时长。\n\n"
-            "4. 请按左侧操作区的顺序依次完成登录、填写活动参数、获取岗位、上传表格、选择起始日期、启动批量录入。\n\n"
-            "5. 您仍需手动在“志愿北京”网站上完成创建项目、创建子项目、创建活动流程。本工具只用于提高招募志愿者和录入时长的效率。\n\n"
-            "6. 活动 ID、组织 ID 需自行从“志愿北京”网站获取，获取方式请参考配套文档。\n\n"
-            "7. 表格需包含列：姓名、身份证号（选填）、岗位、时长、备注（选填）。时长只能填写整数或 .5 小数。您可使用提供的模板.xlsx。岗位列内容必须与“志愿北京”平台一致，也就是与右侧自动获取的岗位列表一致。\n\n"
-            "8. 图片证明材料仅支持 jpg/png 格式；未选择证明材料时，程序会自动使用 1x1 PNG 占位图。\n\n"
-            "9. 每日最多录入 10 小时，程序会自动计算可行性，超出可录入范围的记录将会跳过并写入原因。目前仅支持连续日期录入。\n\n"
-            "10. 录入结果将保存至 *_result.xlsx。本程序为个人开发，未经过全面测试，请在程序执行成功后检查结果文件，并到“志愿北京”平台核查，防止出现错误。\n\n"
-            "11. API 逆向与网关接口由 GitHub @Lqint 实现；重构与可视化界面由 GitHub @xiaoyuer5126 实现。"
+            _p("使用本工具前，" + red + "请您仔细阅读下面的通知：" + end)
+            + _p("1. 本工具用于“志愿北京”新版平台的志愿时长批量录入，旨在方便青协同学处理工作。请仅在自己负责的组织、合规的志愿者管理流程中使用；因未授权、误用或不当使用造成的后果，由使用者自行承担，开发者不承担相关责任。")
+            + _p("2. 本工具为 v3 版本，后续可能仍会更新。请在使用前确认当前程序为最新版本。")
+            + _p("3. 本工具链路：根据姓名和身份证号(如有)在团体内查询志愿者id->若未查到且已填写身份证号，将其加入团体->使用uid加入对应岗位->录入志愿时长。")
+            + _p("4. " + red + "您仍需手动在“志愿北京”网站上完成创建项目、创建子项目、创建活动。" + end + "本工具只用于提高招募志愿者和录入时长的效率。")
+            + _p(red + "5. 请按左侧操作区的顺序依次完成登录、填写活动参数、获取活动信息、上传表格、选择起始日期、启动批量录入。活动 ID、组织 ID 需自行从“志愿北京”网站获取，获取方式请参考配套文档。表格需包含列：姓名、身份证号、岗位、时长、备注（选填）。您可使用提供的模板.xlsx。身份证号可不填，但您需让志愿者自行加入团体或活动。时长只能填写整数或 .5 小数。岗位列内容必须与“志愿北京”平台一致，也就是与右侧自动获取的岗位列表一致。" + end)
+            + _p("6. 图片证明材料仅支持 jpg/png 格式；未选择证明材料时，程序会自动使用 1x1 PNG 占位图。")
+            + _p(red + "7. 每日最多录入 10 小时，程序会自动计算可行性，超出可录入范围的记录将会跳过并写入原因。" + end)
+            + _p("8. 录入结果将保存至 *_result.xlsx。本程序为个人开发，未经过全面测试，" + red + "请在程序执行成功后检查结果文件，并到“志愿北京”平台核查，防止出现错误。" + end)
+            + _p("9. API 逆向与部分网关接口由 GitHub @Lqint 实现；重构、完善与可视化界面由 GitHub @xiaoyuer5126 实现。")
         )
         while True:
             box = QMessageBox(self)
             box.setWindowTitle("重要使用须知")
             box.setIcon(QMessageBox.Information)
+            box.setTextFormat(Qt.RichText)
             box.setText(notice)
             box.setMinimumWidth(860)
-            box.layout().setColumnMinimumWidth(2, 720)
+            box.layout().setColumnMinimumWidth(2, 730)
             doc_button = box.addButton("下载配套文档", QMessageBox.ActionRole)
             box.addButton("我已知晓", QMessageBox.AcceptRole)
             box.exec()
@@ -389,7 +439,7 @@ class MainWindow(QMainWindow):
             self.show_error("请先填写 TOKEN、活动 ID 和组织 ID")
             return
         if not self.posts:
-            self.show_error("请先获取岗位信息")
+            self.show_error("请先获取活动信息")
             return
         if not self.xlsx_path:
             self.show_error("请选择 xlsx 表格")
@@ -406,13 +456,21 @@ class MainWindow(QMainWindow):
             proof_bytes = self.proof_path.read_bytes()
             proof_mime = mimetypes.guess_type(proof_name)[0] or "application/octet-stream"
 
-        qdate = self.date_input.date()
-        start_date = date(qdate.year(), qdate.month(), qdate.day())
+        date_text = self.date_combo.currentText().strip()
+        if not date_text:
+            self.show_error("请先获取活动信息并选择起始日期")
+            return
+        try:
+            start_date = date.fromisoformat(date_text)
+        except ValueError:
+            self.show_error(f"日期格式无效：{date_text}")
+            return
         config = BatchConfig(
             token=token,
             activity_id=activity_id,
             org_id=org_id,
             start_date=start_date,
+            activity_dates=self.activity_dates,
             xlsx_path=self.xlsx_path,
             output_path=result_output_path(self.xlsx_path),
             proof_name=proof_name,
