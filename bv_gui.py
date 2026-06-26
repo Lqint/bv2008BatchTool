@@ -90,6 +90,19 @@ class PostsWorker(Worker):
             self.failed.emit(str(exc))
 
 
+class UserOrgsWorker(Worker):
+    def __init__(self, token: str):
+        super().__init__()
+        self.token = token
+
+    def run(self) -> None:
+        try:
+            default_id, orgs = BVApi(self.token).fetch_user_orgs()
+            self.finished.emit((default_id, orgs))
+        except Exception as exc:
+            self.failed.emit(str(exc))
+
+
 class ActivityDetailsWorker(Worker):
     def __init__(self, token: str, activity_id: str):
         super().__init__()
@@ -137,6 +150,8 @@ class MainWindow(QMainWindow):
         self.token_input.setEchoMode(QLineEdit.Password)
         self.activity_input = QLineEdit()
         self.org_input = QLineEdit()
+        self.org_combo = QComboBox()
+        self.org_combo.setPlaceholderText("登录后自动获取组织")
         self.xlsx_label = QLabel("未选择")
         self.proof_label = QLabel("未选择，将使用 1x1 PNG 占位图")
         self.date_combo = QComboBox()
@@ -146,7 +161,7 @@ class MainWindow(QMainWindow):
         self.post_list.setStyleSheet("font-size: 15px;")
         self.qr_label = QLabel("点击按钮生成二维码")
         self.qr_label.setAlignment(Qt.AlignCenter)
-        self.qr_label.setMinimumSize(220, 220)
+        self.qr_label.setMinimumSize(180, 180)
         self.log = QPlainTextEdit()
         self.log.setReadOnly(True)
         self.qr_button = QPushButton("生成登录二维码")
@@ -180,6 +195,9 @@ class MainWindow(QMainWindow):
 
         activity_box = QGroupBox("2. 活动与岗位")
         activity_layout = QVBoxLayout(activity_box)
+        activity_layout.addWidget(QLabel("组织"))
+        self.org_combo.currentIndexChanged.connect(self.on_org_selected)
+        activity_layout.addWidget(self.org_combo)
         activity_layout.addWidget(QLabel("组织 ID"))
         activity_layout.addWidget(self.org_input)
         activity_layout.addWidget(QLabel("活动 ID"))
@@ -284,7 +302,7 @@ class MainWindow(QMainWindow):
         image.save(buf, format="PNG")
         pixmap = QPixmap()
         pixmap.loadFromData(buf.getvalue(), "PNG")
-        self.qr_label.setPixmap(pixmap.scaled(220, 220, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        self.qr_label.setPixmap(pixmap.scaled(180, 180, Qt.KeepAspectRatio, Qt.SmoothTransformation))
         self.qr_button.setText("重新生成二维码")
         self.qr_button.setEnabled(True)
         self.append_log("二维码已生成，请扫码确认")
@@ -293,6 +311,32 @@ class MainWindow(QMainWindow):
     def on_token_received(self, token: str) -> None:
         self.token_input.setText(token)
         self.append_log("登录成功，TOKEN 已自动填入")
+        self.append_log("正在获取组织信息...")
+        self.run_worker(UserOrgsWorker(token), self.on_orgs_loaded)
+
+    def on_orgs_loaded(self, payload) -> None:
+        default_id, orgs = payload
+        self.org_combo.clear()
+        self.org_combo.blockSignals(True)
+        for org in orgs:
+            oid = str(org.get("orgId", ""))
+            oname = str(org.get("orgName", ""))
+            if oid and oname:
+                self.org_combo.addItem(oname, oid)
+        self.org_combo.blockSignals(False)
+        # Auto-select default org
+        for i in range(self.org_combo.count()):
+            if self.org_combo.itemData(i) == default_id:
+                self.org_combo.setCurrentIndex(i)
+                self.org_input.setText(default_id)
+                break
+        self.append_log(f"已获取 {len(orgs)} 个组织")
+
+    def on_org_selected(self, index: int) -> None:
+        if index >= 0:
+            oid = self.org_combo.itemData(index)
+            if oid:
+                self.org_input.setText(oid)
 
     def on_login_failed(self, message: str) -> None:
         self.qr_button.setEnabled(True)
@@ -400,10 +444,10 @@ class MainWindow(QMainWindow):
         notice = (
             _p("使用本工具前，" + red + "请您仔细阅读下面的通知：" + end)
             + _p("1. 本工具用于“志愿北京”新版平台的志愿时长批量录入，旨在方便青协同学处理工作。请仅在自己负责的组织、合规的志愿者管理流程中使用；因未授权、误用或不当使用造成的后果，由使用者自行承担，开发者不承担相关责任。")
-            + _p("2. 本工具为 v3 版本，后续可能仍会更新。请在使用前确认当前程序为最新版本。")
+            + _p("2. 本工具为 v3 版本，暂为最新稳定版，如志愿北京平台规则不发生变化，不会更新。")
             + _p("3. 本工具链路：根据姓名和身份证号(如有)在团体内查询志愿者id->若未查到且已填写身份证号，将其加入团体->使用uid加入对应岗位->录入志愿时长。")
             + _p("4. " + red + "您仍需手动在“志愿北京”网站上完成创建项目、创建子项目、创建活动。" + end + "本工具只用于提高招募志愿者和录入时长的效率。")
-            + _p(red + "5. 请按左侧操作区的顺序依次完成登录、填写活动参数、获取活动信息、上传表格、选择起始日期、启动批量录入。活动 ID、组织 ID 需自行从“志愿北京”网站获取，获取方式请参考配套文档。表格需包含列：姓名、身份证号、岗位、时长、备注（选填）。您可使用提供的模板.xlsx。身份证号可不填，但您需让志愿者自行加入团体或活动。时长只能填写整数或 .5 小数。岗位列内容必须与“志愿北京”平台一致，也就是与右侧自动获取的岗位列表一致。" + end)
+            + _p(red + "5. 请按左侧操作区的顺序依次完成登录、填写活动参数、获取活动信息、上传表格、选择起始日期、启动批量录入。活动 ID 需自行从“志愿北京”网站获取，获取方式请参考配套文档。表格需包含列：姓名、身份证号、岗位、时长、备注（选填）。您可使用提供的模板.xlsx。身份证号可不填，但您需让志愿者自行加入团体或活动。时长只能填写整数或 .5 小数。岗位列内容必须与“志愿北京”平台一致，也就是与右侧自动获取的岗位列表一致。" + end)
             + _p("6. 图片证明材料仅支持 jpg/png 格式；未选择证明材料时，程序会自动使用 1x1 PNG 占位图。")
             + _p(red + "7. 每日最多录入 10 小时，程序会自动计算可行性，超出可录入范围的记录将会跳过并写入原因。" + end)
             + _p("8. 录入结果将保存至 *_result.xlsx。本程序为个人开发，未经过全面测试，" + red + "请在程序执行成功后检查结果文件，并到“志愿北京”平台核查，防止出现错误。" + end)

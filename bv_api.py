@@ -238,6 +238,18 @@ class BVApi:
             end_time=details.get("endTime", ""),
         )
 
+    def fetch_user_orgs(self) -> tuple[str, list[dict]]:
+        """Fetch current user's organization list.
+
+        Returns (default_org_id, [{orgId, orgName, ...}, ...]).
+        Uses app_id 'zybjuser' (not 'zybjfront').
+        """
+        data = unwrap_success(self.call("zybjfrontcurrUserInfo", {}, app_id="zybjuser"))
+        rd = data.get("resultData", {}).get("currUserRoleInfo", {})
+        default_org_id = str(rd.get("defaultOrgId", ""))
+        orgs = rd.get("currOrgInfo", [])
+        return default_org_id, orgs
+
     def find_formal_member(self, name: str) -> list[dict]:
         """Search group members by plaintext name (no encryption needed).
 
