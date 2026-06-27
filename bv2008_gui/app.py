@@ -192,6 +192,17 @@ def is_auth_error(exc: BaseException | str) -> bool:
     return any(marker in text for marker in markers)
 
 
+def fetch_current_orgs_with_retry(token: str, attempts: int = 3, delay: float = 1.0) -> dict[str, Any]:
+    data: dict[str, Any] = {}
+    for attempt in range(attempts):
+        data = api.fetch_current_orgs(token)
+        if data.get("orgs") or data.get("defaultOrgId"):
+            return data
+        if attempt < attempts - 1:
+            time.sleep(delay)
+    return data
+
+
 class BasePanel(ttk.Frame):
     def __init__(self, master: tk.Misc, app: "BVGuiApp") -> None:
         super().__init__(master, style="Content.TFrame", padding=(app.px(18), app.px(12)))
@@ -461,9 +472,12 @@ class ConfigPanel(BasePanel):
 
     def _load_orgs(self, token: str, auto: bool = False) -> None:
         try:
-            data = api.fetch_current_orgs(token)
+            data = fetch_current_orgs_with_retry(token)
             orgs = data["orgs"]
-            default_id = data["defaultOrgId"]
+            default_id = str(data.get("defaultOrgId") or "")
+            default_id = self.app.remember_org_id(orgs, default_id) or default_id
+            if not orgs:
+                raise RuntimeError("已登录，但当前账号没有返回可用组织 ID；请确认账号有组织管理权限，或手动填写 org_id")
 
             with self.app.cache_lock:
                 self.app.cache["orgs"] = orgs
@@ -1425,6 +1439,30 @@ class BVGuiApp(tk.Tk):
         if self.tutorial_window is not None and self.tutorial_window.winfo_exists():
             self.tutorial_window.complete_panel(panel)
 
+    def remember_org_id(self, orgs: list[dict[str, Any]], default_org_id: str = "") -> str:
+        org_ids: list[str] = []
+        for org in orgs:
+            org_id = str(org.get("orgId") or "").strip()
+            if org_id and org_id not in org_ids:
+                org_ids.append(org_id)
+
+        current = str(self.cfg.get("org_id") or "").strip()
+        if current and (not org_ids or current in org_ids):
+            return current
+
+        default_org_id = str(default_org_id or "").strip()
+        if default_org_id and (not org_ids or default_org_id in org_ids):
+            chosen = default_org_id
+        elif org_ids:
+            chosen = org_ids[0]
+        else:
+            chosen = default_org_id
+
+        if chosen and chosen != current:
+            self.cfg["org_id"] = chosen
+            save_config(self.cfg)
+        return chosen
+
     def warm_cache(self) -> None:
         token = self.cfg.get("token", "")
         if token:
@@ -1436,9 +1474,15 @@ class BVGuiApp(tk.Tk):
     def _warm_cache_worker(self, token: str) -> None:
         try:
             self.ui(lambda: self.status.set("正在后台缓存组织和活动数据…", "busy"))
-            data = api.fetch_current_orgs(token)
-            orgs = data["orgs"]
+            data = fetch_current_orgs_with_retry(token)
+            orgs = data.get("orgs") or []
             default_org_id = str(data.get("defaultOrgId") or "")
+            remembered_org_id = self.remember_org_id(orgs, default_org_id)
+            default_org_id = default_org_id or remembered_org_id
+            if not orgs and remembered_org_id:
+                orgs = [{"orgId": remembered_org_id, "orgName": f"默认组织 {remembered_org_id}"}]
+            if not orgs:
+                raise RuntimeError("已登录，但当前账号没有返回可用组织 ID；请确认账号有组织管理权限，或到配置页手动填写 org_id")
             with self.cache_lock:
                 self.cache["orgs"] = orgs
                 self.cache["default_org_id"] = default_org_id

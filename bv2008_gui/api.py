@@ -15,6 +15,39 @@ if str(PUBLIC_DIR) not in sys.path:
 from bv_client import GATEWAY, call, get_in_sm2_pk, make_sign, sm2_encrypt, unwrap
 
 
+def _coerce_orgs(value: Any) -> list[dict[str, Any]]:
+    if isinstance(value, dict):
+        if any(key in value for key in ("orgId", "org_id", "iid", "id")):
+            values = [value]
+        else:
+            values = []
+            for key in ("dataList", "list", "records", "rows"):
+                rows = value.get(key)
+                if isinstance(rows, list):
+                    values = rows
+                    break
+    elif isinstance(value, list):
+        values = value
+    else:
+        values = []
+
+    orgs: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in values:
+        if not isinstance(item, dict):
+            continue
+        org = dict(item)
+        org_id = str(org.get("orgId") or org.get("org_id") or org.get("iid") or org.get("id") or "").strip()
+        if not org_id or org_id in seen:
+            continue
+        org["orgId"] = org_id
+        if "orgName" not in org and org.get("name"):
+            org["orgName"] = org["name"]
+        orgs.append(org)
+        seen.add(org_id)
+    return orgs
+
+
 def call_no_auth(interface_id: str, params: dict[str, Any], app_id: str = "zybjuser") -> dict[str, Any]:
     form = {
         "app_id": app_id,
@@ -59,13 +92,30 @@ def check_login_status(code_id: str) -> tuple[str, str | None]:
 
 def fetch_current_orgs(token: str) -> dict[str, Any]:
     data = unwrap(call("zybjfrontcurrUserInfo", {}, access_token=token, app_id="zybjuser"))
-    result = data["resultData"]
+    result = data.get("resultData") or {}
     role_info = result.get("currUserRoleInfo") or {}
-    user = role_info.get("user") or {}
+    user = role_info.get("user") or result.get("user") or {}
+    orgs = _coerce_orgs(
+        role_info.get("currOrgInfo")
+        or result.get("currOrgInfo")
+        or result.get("orgs")
+        or result.get("orgList")
+        or result.get("orgInfo")
+    )
+    default_org_id = str(
+        result.get("defaultOrgId")
+        or role_info.get("defaultOrgId")
+        or user.get("defaultOrgId")
+        or ""
+    ).strip()
+    if not default_org_id and orgs:
+        default_org_id = str(orgs[0].get("orgId") or "")
+    if default_org_id and not orgs:
+        orgs = [{"orgId": default_org_id, "orgName": f"默认组织 {default_org_id}"}]
     return {
         "user": user,
-        "defaultOrgId": str(result.get("defaultOrgId") or ""),
-        "orgs": role_info.get("currOrgInfo") or [],
+        "defaultOrgId": default_org_id,
+        "orgs": orgs,
     }
 
 
