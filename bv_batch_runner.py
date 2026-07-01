@@ -28,7 +28,7 @@ class BatchConfig:
     proof_mime: str | None = None
 
 
-REQUIRED_HEADERS = ["姓名", "身份证号", "岗位", "时长", "备注（选填）"]
+REQUIRED_HEADERS = ["姓名", "身份证号", "岗位", "时长", "备注"]
 RESULT_HEADER = "录入结果"
 
 
@@ -85,6 +85,10 @@ def allocate_hours(hours: float, activity_dates: list[str], max_per_day: float =
     return out
 
 
+def build_default_notes(times: list[tuple[str, float]], post_name: str) -> str:
+    return "，".join(f"{day}{post_name}服务{hour:g}h" for day, hour in times)
+
+
 def result_output_path(xlsx_path: Path) -> Path:
     return xlsx_path.with_name(f"{xlsx_path.stem}_result{xlsx_path.suffix}")
 
@@ -121,6 +125,7 @@ def process_row(
     activity_id: str,
     org_id: str,
     post_id: str,
+    post_name: str,
     name: str,
     cert_no: str,
     hours: float,
@@ -137,6 +142,7 @@ def process_row(
             log(f"  {msg}")
 
     times = allocate_hours(hours, activity_dates)
+    notes = notes or build_default_notes(times, post_name)
 
     # Phase 1: query volunteer in org
     user = api.find_org_user(name, cert_no, activity_id, post_id, org_id)
@@ -253,7 +259,7 @@ def run_batch(config: BatchConfig, posts: list[PostInfo], progress: ProgressCall
         name = normalize_text(ws.cell(row=row, column=index["姓名"]).value)
         cert_no = normalize_text(ws.cell(row=row, column=index["身份证号"]).value)
         post_name = normalize_text(ws.cell(row=row, column=index["岗位"]).value)
-        notes = normalize_text(ws.cell(row=row, column=index["备注（选填）"]).value)
+        notes = normalize_text(ws.cell(row=row, column=index["备注"]).value)
         try:
             hours = parse_hours(ws.cell(row=row, column=index["时长"]).value)
         except Exception as exc:
@@ -281,6 +287,7 @@ def run_batch(config: BatchConfig, posts: list[PostInfo], progress: ProgressCall
                 activity_id=config.activity_id,
                 org_id=config.org_id,
                 post_id=post_id,
+                post_name=post_name,
                 name=name,
                 cert_no=cert_no,
                 hours=hours,
