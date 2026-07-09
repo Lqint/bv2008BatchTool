@@ -266,19 +266,27 @@ class BVApi:
         data = unwrap_success(self.call("findFormalMember", biz))
         return data.get("resultData", {}).get("dataList", [])
 
-    def find_recruited_volunteers(self, activity_id: str, post_id: str) -> list[RecruitedVolunteer]:
-        """Query volunteers already recruited in a specific post (handles pagination)."""
+    def find_recruited_volunteers(self, activity_id: str, post_id: str, name: str = "", cert_no: str = "") -> list[RecruitedVolunteer]:
+        """Query volunteers already recruited in a specific post (handles pagination).
+
+        When name and cert_no are provided, searches for a specific volunteer
+        (both values should already be SM2-encrypted before passing in).
+        """
         all_rows: list[dict] = []
         page_no = 1
         page_size = 50  # platform max
         while True:
-            biz = {
+            biz: dict = {
                 "pageNo": page_no,
                 "pageSize": page_size,
                 "state": "5",
                 "activityId": activity_id,
                 "postId": post_id,
             }
+            if name:
+                biz["name"] = name
+            if cert_no:
+                biz["certNo"] = cert_no
             resp = self.call("findRecruitVolunteerList", biz)
             data = unwrap_success(resp)
             result_data = data.get("resultData", {})

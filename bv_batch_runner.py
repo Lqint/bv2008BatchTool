@@ -9,7 +9,7 @@ from typing import Callable
 
 from openpyxl import load_workbook
 
-from bv_api import BVApi, PostInfo, RecruitedVolunteer, fetch_all_recruited
+from bv_api import BVApi, AmbiguousUserError, PostInfo, RecruitedVolunteer, fetch_all_recruited
 
 ProgressCallback = Callable[[str], None]
 
@@ -134,6 +134,7 @@ def process_row(
     proof_name: str | None,
     proof_bytes: bytes | None,
     proof_mime: str | None,
+    posts: list[PostInfo],
     all_recruited: list[RecruitedVolunteer] | None = None,
     log: Callable[[str], None] | None = None,
 ) -> str:
@@ -145,12 +146,15 @@ def process_row(
     notes = notes or build_default_notes(times, post_name)
 
     # Phase 1: query volunteer in org
-    user = api.find_org_user(name, cert_no, activity_id, post_id, org_id)
+    try:
+        user = api.find_org_user(name, cert_no, activity_id, post_id, org_id)
+    except AmbiguousUserError as e:
+        return f"失败：{e}"
     if user:
         uid = str(user.get("uid", "")).strip()
         if not uid:
             return "失败：查询结果缺少 uid"
-        log(f"\n---正在查询志愿者-{name}：已找到（uid={uid}），加入岗位并录入 {hours} 小时")
+        _log(f"---正在查询志愿者-{name}：已找到（uid={uid}），加入岗位并录入 {hours} 小时")
         api.add_to_post(activity_id, post_id, org_id, uid)
         file_path = api.upload_proof(proof_name, proof_bytes, proof_mime)
         result = api.record_hours(activity_id, post_id, org_id, uid, times, file_path, notes=notes)
@@ -158,37 +162,63 @@ def process_row(
             return f"失败：录入接口返回失败：{result}"
         return "成功"
 
-    log(f"\n---正在查询志愿者-{name}：未在可招募列表中查到，可能已入岗或未加入团体")
+    if cert_no:
+        _log(f"---正在查询志愿者-{name}：未在可招募列表中查到，可能已入岗或未加入团体")
+    else:
+        _log(f"---正在查询志愿者-{name}：仅姓名查不到且无身份证号")
 
     # Phase 2: not found → try add_member if cert_no available
     if cert_no:
         ok, message = api.add_member(name, cert_no)
-        _log(f"  尝试将 {name} 加入团体：{'成功' if ok else '失败'} — {message}")
-        if ok:
+        _log(f"  尝试将 {name} 加入团体：{'' if ok else '失败 — '}{message}")
+        if not ok:
+            return f"失败：加入团体失败：{message}"
+        try:
             user = api.find_org_user(name, cert_no, activity_id, post_id, org_id)
-            if user:
-                uid = str(user.get("uid", "")).strip()
-                if not uid:
-                    return "失败：查询结果缺少 uid"
-                _log(f"  重新查询志愿者：已找到（uid={uid}），加入岗位并录入 {hours} 小时")
-                api.add_to_post(activity_id, post_id, org_id, uid)
-                file_path = api.upload_proof(proof_name, proof_bytes, proof_mime)
-                result = api.record_hours(activity_id, post_id, org_id, uid, times, file_path, notes=notes)
-                if result.get("resultData") is False:
-                    return f"失败：录入接口返回失败：{result}"
-                return "成功"
-            _log("  重新查询志愿者：未查到，用户可能在团体内")
+        except AmbiguousUserError as e:
+            return f"失败：{e}"
+        if user:
+            uid = str(user.get("uid", "")).strip()
+            if not uid:
+                return "失败：查询结果缺少 uid"
+            _log(f"  重新查询志愿者：已找到（uid={uid}），加入岗位并录入 {hours} 小时")
+            api.add_to_post(activity_id, post_id, org_id, uid)
+            file_path = api.upload_proof(proof_name, proof_bytes, proof_mime)
+            result = api.record_hours(activity_id, post_id, org_id, uid, times, file_path, notes=notes)
+            if result.get("resultData") is False:
+                return f"失败：录入接口返回失败：{result}"
+            return "成功"
 
-    # Phase 3: user is in the group but not findable via find_org_user
+        # Phase 3: step 10 failed → enumerate posts with encrypted name+certNo
+        _log("  重新查询志愿者：未查到，枚举岗位查找已入岗记录")
+        encrypted_name = api.encrypt(name)
+        encrypted_cert = api.encrypt(cert_no)
+        for p in posts:
+            found = api.find_recruited_volunteers(activity_id, p.post_id, encrypted_name, encrypted_cert)
+            if found:
+                rv = found[0]
+                if rv.post_id == post_id:
+                    _log(f"  已在目标岗位，直接录入 {hours} 小时：录入成功")
+                    file_path = api.upload_proof(proof_name, proof_bytes, proof_mime)
+                    result = api.record_hours(activity_id, post_id, org_id, rv.uid, times, file_path, notes=notes)
+                    if result.get("resultData") is False:
+                        return f"失败：录入接口返回失败：{result}"
+                    return "成功（已在岗，直接录入）"
+                else:
+                    _log(f"  已在岗位【{p.name}】，兼项不允许")
+                    return f"失败：志愿者已在岗位【{p.name}】，平台不允许兼项"
+        _log("  枚举所有岗位未找到，无法确认志愿者状态")
+        return "失败：加入团体后未在任何岗位查询到该志愿者"
+
+    # Phase 4: no cert_no → findFormalMember (only name search)
+    _log("  使用 findFormalMember 按姓名查找")
     members = api.find_formal_member(name)
     if len(members) > 1:
         _log(f"  按姓名查找uid：失败，返回 {len(members)} 条结果，请自行确认")
         return f"失败：姓名匹配到 {len(members)} 人，请手动确认后重试"
     if not members:
         _log("  按姓名查找uid：失败，未查到")
-        if not cert_no:
-            return "失败：按姓名在团体内未查询到志愿者，且缺少身份证号，无法加入团体"
-        return "失败：加入团体后仍未查询到 uid"
+        return "失败：按姓名在团体内未查询到志愿者，且缺少身份证号，无法加入团体"
 
     member = members[0]
     uid = str(member.get("uid", "")).strip()
@@ -196,7 +226,7 @@ def process_row(
         return "失败：团体成员查询结果缺少 uid"
     _log(f"  按姓名查找uid：成功，找到团体成员（uid={uid}），检查已入岗名单")
 
-    # Check recruited list for 兼项
+    # Check pre-fetched recruited list for 兼项
     if all_recruited:
         for rv in all_recruited:
             if rv.uid == uid:
@@ -209,7 +239,7 @@ def process_row(
                     return "成功（已在岗，直接录入）"
                 else:
                     _log(f"  已在岗位【{rv.post_name}】，兼项不允许")
-                    return f"失败：志愿者已在岗位【{rv.post_name or rv.post_id}】，平台不允许兼项"
+                    return f"失败：志愿者已在岗位【{rv.post_name}】，平台不允许兼项"
         _log("  未在已入岗名单中找到，加入岗位")
 
     # Not in any recruited list — try to add to post
@@ -296,6 +326,7 @@ def run_batch(config: BatchConfig, posts: list[PostInfo], progress: ProgressCall
                 proof_name=config.proof_name,
                 proof_bytes=config.proof_bytes,
                 proof_mime=config.proof_mime,
+                posts=posts,
                 all_recruited=all_recruited,
                 log=log,
             )
