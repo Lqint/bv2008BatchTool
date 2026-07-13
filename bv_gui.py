@@ -151,6 +151,7 @@ class MainWindow(QMainWindow):
 
         self.posts: list[PostInfo] = []
         self.activity_dates: list[str] = []
+        self._fetched_activity_id: str = ""
         self.xlsx_path: Path | None = None
         self.proof_path: Path | None = None
         self.active_threads: list[QThread] = []
@@ -325,7 +326,7 @@ class MainWindow(QMainWindow):
         image.save(buf, format="PNG")
         pixmap = QPixmap()
         pixmap.loadFromData(buf.getvalue(), "PNG")
-        self.qr_label.setPixmap(pixmap.scaled(350, 350, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        self.qr_label.setPixmap(pixmap.scaled(300, 300, Qt.KeepAspectRatio, Qt.SmoothTransformation))
         self.qr_button.setText("重新生成二维码")
         self.qr_button.setEnabled(True)
         self.append_log("二维码已生成，请扫码确认")
@@ -371,7 +372,7 @@ class MainWindow(QMainWindow):
         activity_id = self.activity_input.text().strip()
         org_id = self.org_input.text().strip()
         if not token or not activity_id or not org_id:
-            self.show_error("请先填写 TOKEN、活动 ID 和组织 ID")
+            self.show_error("请先填写 TOKEN、组织 ID 和活动 ID")
             return
         self.append_log("正在获取岗位信息和活动详情...")
         self.run_worker(PostsWorker(token, activity_id, org_id), self.on_posts_loaded)
@@ -381,10 +382,11 @@ class MainWindow(QMainWindow):
         self.post_list.clear()
         for post in posts:
             self.post_list.addItem(post.name)
+        self._fetched_activity_id = self.activity_input.text().strip()
         self.append_log(f"已获取 {len(posts)} 个岗位")
         # Also fetch activity details for date list
         token = self.token_input.text().strip()
-        activity_id = self.activity_input.text().strip()
+        activity_id = self._fetched_activity_id
         if token and activity_id:
             self.run_worker(ActivityDetailsWorker(token, activity_id), self.on_details_loaded)
 
@@ -504,10 +506,13 @@ class MainWindow(QMainWindow):
         activity_id = self.activity_input.text().strip()
         org_id = self.org_input.text().strip()
         if not token or not activity_id or not org_id:
-            self.show_error("请先填写 TOKEN、活动 ID 和组织 ID")
+            self.show_error("请先填写 TOKEN、组织 ID 和活动 ID")
             return
-        if not self.posts:
+        if not self.posts or not self._fetched_activity_id:
             self.show_error("请先获取活动信息")
+            return
+        if activity_id != self._fetched_activity_id:
+            self.show_error("活动 ID 已修改，请重新获取活动信息")
             return
         if not self.xlsx_path:
             self.show_error("请选择 xlsx 表格")
