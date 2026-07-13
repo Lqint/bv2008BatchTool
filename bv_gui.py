@@ -133,6 +133,16 @@ class BatchWorker(Worker):
             self.failed.emit(str(exc))
 
 
+class SquareLabel(QLabel):
+    """QLabel that keeps itself square, matching width to its height."""
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        h = self.height()
+        if self.width() != h:
+            self.setFixedWidth(h)
+
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -150,6 +160,8 @@ class MainWindow(QMainWindow):
         self.token_input.setEchoMode(QLineEdit.Password)
         self.activity_input = QLineEdit()
         self.org_input = QLineEdit()
+        self.org_input.setReadOnly(True)
+        self.org_input.setPlaceholderText("请从上方组织列表选择")
         self.org_combo = QComboBox()
         self.org_combo.setPlaceholderText("登录后自动获取，点击选择")
         self.xlsx_label = QLabel("未选择")
@@ -159,15 +171,14 @@ class MainWindow(QMainWindow):
         self.date_combo.setPlaceholderText("请先获取活动信息")
         self.post_list = QListWidget()
         self.post_list.setStyleSheet("font-size: 15px;")
-        self.qr_label = QLabel("点击按钮生成二维码")
+        self.qr_label = SquareLabel("点击左侧按钮\n生成二维码")
         self.qr_label.setAlignment(Qt.AlignCenter)
-        self.qr_label.setMinimumSize(180, 180)
+        self.qr_label.setScaledContents(True)
         self.log = QPlainTextEdit()
         self.log.setReadOnly(True)
         self.qr_button = QPushButton("生成登录二维码")
         self.start_button = QPushButton("开始批量录入")
         self.notice_button = QPushButton("查看须知")
-        self.result_label = QLabel("")
 
         self.setup_ui()
         QTimer.singleShot(0, self.show_start_notice)
@@ -186,7 +197,6 @@ class MainWindow(QMainWindow):
 
         login_box = QGroupBox("1. 登录")
         login_layout = QVBoxLayout(login_box)
-        login_layout.addWidget(self.qr_label)
         self.qr_button.clicked.connect(self.create_qr)
         login_layout.addWidget(self.qr_button)
         login_layout.addWidget(QLabel("或手动粘贴 TOKEN（调试用）"))
@@ -230,22 +240,34 @@ class MainWindow(QMainWindow):
         left.addWidget(self.start_button)
         left.addStretch(1)
 
+        # QR + Posts row
+        qr_posts_row = QHBoxLayout()
+        qr_posts_row.setContentsMargins(0, 0, 0, 0)
+
+        qr_box = QGroupBox("登录二维码")
+        qr_layout = QVBoxLayout(qr_box)
+        qr_layout.addWidget(self.qr_label)
+        qr_posts_row.addWidget(qr_box)
+
+        posts_col = QVBoxLayout()
+        posts_col.setContentsMargins(0, 0, 0, 0)
         notice_bar = QHBoxLayout()
         notice_bar.setContentsMargins(0, 0, 0, 0)
         notice_bar.addStretch(1)
         self.notice_button.clicked.connect(self.show_start_notice)
         notice_bar.addWidget(self.notice_button)
-        right.addLayout(notice_bar)
+        posts_col.addLayout(notice_bar)
+        posts_box = QGroupBox("岗位列表（表格中的<岗位>列需匹配这里的名称）")
+        posts_inner = QVBoxLayout(posts_box)
+        posts_inner.addWidget(self.post_list)
+        posts_col.addWidget(posts_box)
+        qr_posts_row.addLayout(posts_col, 2)
 
-        posts_box = QGroupBox("岗位列表（表格中的“岗位”列需匹配这里的名称）")
-        posts_layout = QVBoxLayout(posts_box)
-        posts_layout.addWidget(self.post_list)
-        right.addWidget(posts_box, 2)
+        right.addLayout(qr_posts_row, 2)
 
         log_box = QGroupBox("处理日志")
         log_layout = QVBoxLayout(log_box)
         log_layout.addWidget(self.log)
-        log_layout.addWidget(self.result_label)
         right.addWidget(log_box, 3)
 
         self.setStyleSheet(
@@ -256,6 +278,7 @@ class MainWindow(QMainWindow):
             QGroupBox { border: 1px solid #d8cfc4; border-radius: 6px; margin-top: 10px; padding: 10px; background: #fffdfa; }
             QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 4px; color: #2f2523; font-weight: 600; }
             QLineEdit, QComboBox, QPlainTextEdit, QListWidget { border: 1px solid #d1c7bb; border-radius: 4px; padding: 6px; background: #ffffff; color: #2f2523; }
+            QLineEdit:read-only { background: #f0ebe3; color: #8c7b6e; }
             QPushButton { border: 1px solid rgb(174, 11, 42); border-radius: 4px; padding: 8px 10px; color: #ffffff; background: rgb(174, 11, 42); font-weight: 600; }
             QPushButton:hover { background: #8f0924; border-color: #8f0924; }
             QPushButton:disabled { background: #b8aaa9; border-color: #b8aaa9; }
@@ -302,7 +325,7 @@ class MainWindow(QMainWindow):
         image.save(buf, format="PNG")
         pixmap = QPixmap()
         pixmap.loadFromData(buf.getvalue(), "PNG")
-        self.qr_label.setPixmap(pixmap.scaled(180, 180, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+        self.qr_label.setPixmap(pixmap.scaled(350, 350, Qt.KeepAspectRatio, Qt.SmoothTransformation))
         self.qr_button.setText("重新生成二维码")
         self.qr_button.setEnabled(True)
         self.append_log("二维码已生成，请扫码确认")
@@ -310,7 +333,8 @@ class MainWindow(QMainWindow):
 
     def on_token_received(self, token: str) -> None:
         self.token_input.setText(token)
-        self.append_log("登录成功，TOKEN 已自动填入")
+        self.token_input.setReadOnly(True)
+        self.append_log("登录成功，TOKEN 已自动填入并锁定")
         self.append_log("正在获取组织信息...")
         self.run_worker(UserOrgsWorker(token), self.on_orgs_loaded)
 
@@ -523,14 +547,13 @@ class MainWindow(QMainWindow):
         )
 
         self.start_button.setEnabled(False)
-        self.result_label.setText("")
         self.append_log("开始批量录入...")
         worker = BatchWorker(config, self.posts)
         self.run_worker(worker, self.on_batch_finished, on_failed=self.on_batch_failed, progress=self.append_log)
 
     def on_batch_finished(self, output: Path) -> None:
         self.start_button.setEnabled(True)
-        self.result_label.setText(f"结果文件：{output}")
+        self.append_log(f"结果文件：{output}")
         self.append_log("批量录入完成")
         QMessageBox.information(self, "完成", f"结果文件已生成：\n{output}")
 
