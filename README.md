@@ -111,21 +111,26 @@ python bv_gui.py
 
 TOKEN、活动 ID、组织 ID 都在界面中填写。接口地址 `GATEWAY` 固定写在 [bv_api.py](bv_api.py) 顶部。
 
-## 打包 exe
+## 打包
 
-Windows 上运行：
+### Windows
 
 ```powershell
 .\build_exe.ps1
 ```
 
-生成文件：
+生成 `dist\bv2008BatchTool.exe`，带 bv2008 网站图标。
 
-```text
-dist\bv2008BatchTool\bv2008BatchTool.exe
+### macOS
+
+```bash
+chmod +x build_mac.sh
+./build_mac.sh
 ```
 
-把 `dist\bv2008BatchTool` 整个文件夹发给同学即可。
+生成 `dist/bv2008BatchTool.app`，带 bv2008 网站图标。
+首次打开时若提示"来自身份不明的开发者"，右键 → 打开即可。
+跨架构打包需要在对应芯片的 Mac 上进行（Apple Silicon 或 Intel）。
 
 ## 文件结构
 
@@ -135,6 +140,9 @@ dist\bv2008BatchTool\bv2008BatchTool.exe
 ├── bv_batch_runner.py  # xlsx 读取、批处理、结果写回
 ├── requirements.txt    # 运行与打包依赖
 ├── build_exe.ps1       # Windows 打包脚本
-├── support_doc.png     # 启动通知中的配套文档下载源
+├── build_mac.sh        # macOS 打包脚本
+├── logo.ico            # 应用图标
+├── logo.png            # 应用图标
+├── support_doc.png     # 配套文档
 └── LICENSE
 ```

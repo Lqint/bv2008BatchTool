@@ -12,7 +12,7 @@ from pathlib import Path
 from openpyxl import Workbook
 import qrcode
 from PySide6.QtCore import QObject, Qt, QThread, QTimer, Signal
-from PySide6.QtGui import QPixmap
+from PySide6.QtGui import QPixmap, QIcon
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -147,6 +147,9 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("志愿北京时长批量录入v3.2")
+        icon_path = self.resource_path("logo.ico")
+        if icon_path.exists():
+            self.setWindowIcon(QIcon(str(icon_path)))
         self.resize(1100, 760)
 
         self.posts: list[PostInfo] = []
