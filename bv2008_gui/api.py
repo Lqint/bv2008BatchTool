@@ -233,5 +233,30 @@ def add_post_members(token: str, activity_id: str, post_id: str, org_id: str, ui
     unwrap(call("activityUser-addList", biz, access_token=token))
 
 
+def delete_activity_members(token: str, iids: list[str]) -> None:
+    """Remove activity-member relation records by their relation iids."""
+    cleaned = list(dict.fromkeys(str(iid).strip() for iid in iids if iid is not None and str(iid).strip()))
+    if not cleaned:
+        raise ValueError("至少需要一个成员记录 iid")
+    unwrap(call("activityUser-deleteList", {"iids": cleaned}, access_token=token))
+
+
+def delete_timing_records(token: str, activity_id: str, iids: list[str]) -> None:
+    """Delete service-time records by iid within an activity."""
+    activity_id = str(activity_id).strip()
+    cleaned = list(dict.fromkeys(str(iid).strip() for iid in iids if iid is not None and str(iid).strip()))
+    if not activity_id:
+        raise ValueError("activity_id 不能为空")
+    if not cleaned:
+        raise ValueError("至少需要一个时长记录 iid")
+    unwrap(
+        call(
+            "activityTiming-bathDelete",
+            {"iids": cleaned, "activityId": activity_id},
+            access_token=token,
+        )
+    )
+
+
 def get_public_key(token: str) -> str:
     return get_in_sm2_pk(token)

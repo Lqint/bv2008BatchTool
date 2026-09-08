@@ -69,7 +69,7 @@ FONT_TITLE = ("Microsoft YaHei UI", 15, "bold")
 FONT_SECTION = ("Microsoft YaHei UI", 11, "bold")
 FONT_HEADER = ("Microsoft YaHei UI", 13, "bold")
 
-NAV_INDEX = {"login": "01", "config": "02", "import": "03", "roster": "04"}
+NAV_INDEX = {"login": "01", "config": "02", "import": "03", "roster": "04", "undo": "05"}
 
 
 def enable_high_dpi_awareness() -> None:
@@ -164,6 +164,18 @@ def match_roster_user(row: ImportRow, roster: list[dict[str, Any]]) -> tuple[dic
     if len(matches) > 1:
         return None, f"multiple roster matches: {len(matches)}"
     return None, "not found in roster"
+
+
+def parse_record_iids(value: str) -> list[str]:
+    """Parse a pasted comma/space/newline-separated iid list, preserving order."""
+    result: list[str] = []
+    seen: set[str] = set()
+    for part in value.replace(",", " ").replace("，", " ").split():
+        iid = part.strip()
+        if iid and iid not in seen:
+            result.append(iid)
+            seen.add(iid)
+    return result
 
 
 def is_auth_error(exc: BaseException | str) -> bool:
@@ -737,6 +749,149 @@ class RosterPanel(BasePanel):
             self.ui(lambda message=message: messagebox.showerror("加载失败", message))
 
 
+class UndoPanel(BasePanel):
+    MEMBER_COLUMNS = ("脱敏姓名", "uid", "成员记录 iid", "审核时间")
+
+    def __init__(self, master: tk.Misc, app: "BVGuiApp") -> None:
+        super().__init__(master, app)
+        self.member_rows: dict[str, dict[str, Any]] = {}
+        self.page_header("撤销操作", "删除是远端永久操作，请先核对当前活动。成员可从名单选择；时长记录需粘贴网页端对应的记录 iid。")
+
+        member_box = self.section("从活动删除成员", "刷新当前岗位名单，按 Ctrl 或 Shift 可多选。这里使用成员关系 iid，不是志愿者 uid。")
+        member_actions = ttk.Frame(member_box, style="CardBody.TFrame")
+        member_actions.pack(fill="x", pady=(0, self.app.px(8)))
+        ttk.Button(member_actions, text="刷新名单", style="Secondary.TButton", command=self.refresh_members).pack(side="left")
+        ttk.Button(member_actions, text="删除选中成员", style="Danger.TButton", command=self.delete_selected_members).pack(side="left", padx=(self.app.px(8), 0))
+        self.member_table = TreeFrame(member_box, self.MEMBER_COLUMNS, height=6)
+        self.member_table.pack(fill="both", expand=True)
+
+        timing_box = self.section("删除时长记录", "粘贴一条或多条时长记录 iid，可用空格、逗号或换行分隔；活动 ID 默认取当前配置。")
+        timing_top = ttk.Frame(timing_box, style="CardBody.TFrame")
+        timing_top.pack(fill="x", pady=(0, self.app.px(8)))
+        ttk.Label(timing_top, text="活动 ID", style="FieldLabel.TLabel").pack(side="left")
+        self.activity_var = tk.StringVar(value=str(self.app.cfg.get("activity_id") or ""))
+        ttk.Entry(timing_top, textvariable=self.activity_var).pack(side="left", fill="x", expand=True, padx=(self.app.px(8), 0))
+        timing_bottom = ttk.Frame(timing_box, style="CardBody.TFrame")
+        timing_bottom.pack(fill="x")
+        ttk.Label(timing_bottom, text="记录 iid", style="FieldLabel.TLabel").pack(side="left")
+        self.timing_iids_var = tk.StringVar()
+        ttk.Entry(timing_bottom, textvariable=self.timing_iids_var).pack(side="left", fill="x", expand=True, padx=(self.app.px(8), 0))
+        ttk.Button(timing_bottom, text="删除时长记录", style="Danger.TButton", command=self.delete_timing).pack(side="left", padx=(self.app.px(8), 0))
+
+    def _token(self) -> str:
+        token = str(self.app.cfg.get("token") or "").strip()
+        if not token:
+            raise ValueError("请先登录")
+        return token
+
+    def refresh_members(self) -> None:
+        cfg = self.app.cfg
+        if not cfg.get("token") or not cfg.get("activity_id") or not cfg.get("post_id"):
+            messagebox.showerror("缺少配置", "请先登录并配置活动和岗位")
+            return
+        self.notify("正在加载可撤销成员", "busy")
+        self.app.run_bg(self._load_members)
+
+    def _load_members(self) -> None:
+        cfg = self.app.cfg
+        try:
+            roster = api.fetch_roster(cfg["token"], cfg["activity_id"], cfg["post_id"])
+
+            def fill() -> None:
+                self.member_rows.clear()
+                self.member_table.clear()
+                skipped = 0
+                for row in roster:
+                    iid = str(row.get("iid") or "").strip()
+                    if not iid:
+                        skipped += 1
+                        continue
+                    self.member_rows[iid] = row
+                    self.member_table.add_row(
+                        (row.get("nameSensitive", ""), row.get("uid", ""), iid, row.get("approvedTime", "")),
+                        iid=iid,
+                    )
+                suffix = f"，另有 {skipped} 条缺少 iid 已跳过" if skipped else ""
+                self.notify(f"已加载 {len(self.member_rows)} 条可撤销成员{suffix}", "success")
+
+            self.ui(fill)
+        except Exception as exc:
+            if is_auth_error(exc):
+                self.ui(lambda exc=exc: self.app.handle_auth_error(exc))
+                return
+            message = str(exc)
+            self.ui(lambda message=message: messagebox.showerror("加载失败", message))
+
+    def delete_selected_members(self) -> None:
+        selected = [iid for iid in self.member_table.tree.selection() if iid in self.member_rows]
+        if not selected:
+            messagebox.showwarning("提示", "请先刷新名单并选择要删除的成员")
+            return
+        names = [str(self.member_rows[iid].get("nameSensitive") or self.member_rows[iid].get("uid") or iid) for iid in selected]
+        preview = "、".join(names[:5]) + ("…" if len(names) > 5 else "")
+        if not messagebox.askyesno(
+            "确认删除成员",
+            f"将从当前活动删除 {len(selected)} 名成员：\n{preview}\n\n此操作不会删除志愿者账号，但无法在本工具中自动恢复。是否继续？",
+        ):
+            return
+        self.notify("正在删除选中成员", "busy")
+        self.app.run_bg(lambda: self._delete_members(selected))
+
+    def _delete_members(self, iids: list[str]) -> None:
+        try:
+            api.delete_activity_members(self._token(), iids)
+
+            def finish() -> None:
+                for iid in iids:
+                    if self.member_table.tree.exists(iid):
+                        self.member_table.tree.delete(iid)
+                    self.member_rows.pop(iid, None)
+                self.notify(f"已删除 {len(iids)} 名活动成员", "success")
+                messagebox.showinfo("撤销完成", f"已从活动删除 {len(iids)} 名成员")
+
+            self.ui(finish)
+        except Exception as exc:
+            if is_auth_error(exc):
+                self.ui(lambda exc=exc: self.app.handle_auth_error(exc))
+                return
+            message = str(exc)
+            self.ui(lambda message=message: messagebox.showerror("删除失败", message))
+
+    def delete_timing(self) -> None:
+        activity_id = self.activity_var.get().strip()
+        iids = parse_record_iids(self.timing_iids_var.get())
+        if not activity_id:
+            messagebox.showwarning("提示", "请输入时长记录所属的活动 ID")
+            return
+        if not iids:
+            messagebox.showwarning("提示", "请输入至少一个时长记录 iid")
+            return
+        if not messagebox.askyesno(
+            "确认删除时长",
+            f"将永久删除活动 {activity_id} 下的 {len(iids)} 条时长记录。\n\n此操作无法在本工具中自动恢复，是否继续？",
+        ):
+            return
+        self.notify("正在删除时长记录", "busy")
+        self.app.run_bg(lambda: self._delete_timing(activity_id, iids))
+
+    def _delete_timing(self, activity_id: str, iids: list[str]) -> None:
+        try:
+            api.delete_timing_records(self._token(), activity_id, iids)
+
+            def finish() -> None:
+                self.timing_iids_var.set("")
+                self.notify(f"已删除 {len(iids)} 条时长记录", "success")
+                messagebox.showinfo("撤销完成", f"已删除 {len(iids)} 条时长记录")
+
+            self.ui(finish)
+        except Exception as exc:
+            if is_auth_error(exc):
+                self.ui(lambda exc=exc: self.app.handle_auth_error(exc))
+                return
+            message = str(exc)
+            self.ui(lambda message=message: messagebox.showerror("删除失败", message))
+
+
 class ImportPanel(BasePanel):
     COLUMNS = ("姓名", "时数", "证件号", "组织搜索", "入岗", "时数录入", "状态")
 
@@ -1125,6 +1280,7 @@ class HelpPanel:
 2. 配置活动页依次获取组织、项目、活动、岗位，选中岗位后保存配置。
 3. 查看名单页确认岗位名单是否正确。
 4. Excel 批量导入页先预览，再开始全流程。
+5. 如果误加成员或误录时长，打开“撤销操作”页；删除前务必核对活动和记录 iid。
 
 二、Excel 文件要求
 
@@ -1140,6 +1296,7 @@ class HelpPanel:
 2. accessToken 会过期；遇到未登录或权限异常时请重新扫码。
 3. 项目列表默认只展示可直接查询活动的项目，隐藏容易误选的一级项目。
 4. 证明图片每个人都会重新上传，避免 filePath 复用失败。
+5. 撤销操作会直接删除远端数据，无法在本工具中自动恢复。成员删除使用成员关系 iid，时长删除使用时长记录 iid，二者都不是 uid。
 
 四、开发与维护
 
@@ -1155,12 +1312,14 @@ class BVGuiApp(tk.Tk):
         ("config", "配置活动"),
         ("import", "Excel 批量导入"),
         ("roster", "查看名单"),
+        ("undo", "撤销操作"),
     )
     PANELS: dict[str, type[BasePanel]] = {
         "login": LoginPanel,
         "config": ConfigPanel,
         "import": ImportPanel,
         "roster": RosterPanel,
+        "undo": UndoPanel,
     }
 
     def __init__(self) -> None:
@@ -1289,6 +1448,12 @@ class BVGuiApp(tk.Tk):
             "Secondary.TButton",
             background=[("disabled", "#E5EAF1"), ("pressed", "#E2E8F0"), ("active", "#EEF2F7")],
             foreground=[("disabled", "#94A3B8"), ("active", PALETTE["text"]), ("pressed", PALETTE["text"])],
+        )
+        style.configure("Danger.TButton", padding=(px(12), px(7)), background=PALETTE["error"], foreground="#FFFFFF", borderwidth=0)
+        style.map(
+            "Danger.TButton",
+            background=[("disabled", "#E5EAF1"), ("pressed", "#991B1B"), ("active", "#B91C1C")],
+            foreground=[("disabled", "#94A3B8"), ("active", "#FFFFFF"), ("pressed", "#FFFFFF")],
         )
         style.configure("Ghost.TButton", padding=(px(12), px(7)), background=PALETTE["surface"], foreground=PALETTE["accent"], borderwidth=1)
         style.map("Ghost.TButton", background=[("active", PALETTE["accent_soft"]), ("pressed", "#FEE2E2")])
