@@ -2,13 +2,13 @@
 
 逆向志愿北京（bv2008.cn）网关接口，实现志愿者批量导入与服务时数录入的自动化。
 
-`志愿北京批量操作终端.exe`测试版已上线欢迎通过[release](https://github.com/Lqint/bv2008BatchTool/tags)下载体验。
-
 ## ⚠️ 重要警示：录入时数前必须先 addList
 
 **站点 bug**：`activityTiming-batchAdd` 不校验成员关系，直接写时数也能成功，但志愿者不会出现在岗位成员列表中，造成时数与名单不一致。
 
-如手动调用api操作，**必须按顺序**：`findOrgUserList` → `addList` → `upload` → `batchAdd`
+**必须按顺序**：`findOrgUserList` → `addList` → `upload` → `batchAdd`
+
+`bv_batch_from_xls.py` 已在内部自动执行此顺序。
 
 ---
 
@@ -52,7 +52,7 @@ python3 bv_login.py
 搜不到某人时（`findOrgUserList` 返回空），说明他未在本团体注册。先用此脚本将其加入：
 
 ```bash
-python3 bv_add_org_member.py name id_num
+python3 bv_add_org_member.py 施凯鑫 210221200601187519
 
 # 批量（CSV，每行: 姓名,证件号）
 python3 bv_add_org_member.py --file members.csv
@@ -116,24 +116,19 @@ python3 bv_batch_from_xls.py roster.xls --start 2026-05-01 --max-hours 8
 
 Excel 格式要求：第一行表头含 `学生姓名` 和 `认定时(次)数` 列。
 
-### 获取项目 ID
+### 撤销活动成员或时长记录
 
-如果只知道组织 ID（`org_id` / `ORG_ID`），可以先用 `bv_list_projects.py` 拉取该组织下的项目列表：
+命令行工具 `bv_undo.py` 封装了两个删除接口。删除是远端永久操作，默认需要输入 `yes` 二次确认：
 
 ```bash
-python3 bv_list_projects.py
+# 从活动删除成员：参数是岗位名单返回的成员关系 iid，不是 uid
+python3 bv_undo.py member d9510734076a48c397fce56e2f00e570
 
-# 或临时指定组织 ID / token
-python3 bv_list_projects.py --org-id 223718004 --token "<accessToken>"
-
-# 输出 JSON，便于脚本继续处理
-python3 bv_list_projects.py --org-id 223718004 --json
+# 删除时长记录：参数是时长记录 iid，并需要指定所属活动
+python3 bv_undo.py timing --activity-id 1546164942829256704 0588534e3c64437ab83ef6806a18da50
 ```
 
-输出中的 `project_id` 对应接口返回字段 `iid`。
-
-- `level=1`：一级项目
-- `level=2`：二级项目，通常用于活动列表接口的 `projectId`
+可用空格或逗号一次传入多条 iid；自动化调用可增加 `--yes`。新版 Windows GUI 的侧栏也提供“撤销操作”页：成员可刷新名单后多选删除，时长记录可批量粘贴 iid 删除。
 
 ---
 
@@ -176,11 +171,12 @@ encrypted = "04" + SM2.encrypt(plaintext, pk, mode=1)
 | interface_id | app_id | 说明 |
 |---|---|---|
 | `getInSm2Key` | zybjfront | 取加密公钥 |
-| `addMember` | zybjfront | 按加密姓名和证件号加入团体成员池 |
 | `activityUser-findOrgUserList` | zybjfront | 按加密姓名查 uid |
 | `activityUser-addList` | zybjfront | 批量加入岗位 |
+| `activityUser-deleteList` | zybjfront | 按成员关系 iid 从活动删除成员 |
 | `zybj_uploadFile` | **zybjuser** | 上传证明图，返回 newName |
 | `activityTiming-batchAdd` | zybjfront | 录入时数 |
+| `activityTiming-bathDelete` | zybjfront | 按记录 iid 删除指定活动的时长记录 |
 
 ---
 
@@ -204,27 +200,135 @@ encrypted = "04" + SM2.encrypt(plaintext, pk, mode=1)
 ├── bv_import.py        # 批量添加成员
 ├── bv_add_org_member.py # 按姓名+证件号将志愿者加入团体成员池
 ├── bv_record_hours.py  # 单人时数录入
+├── bv_undo.py          # 撤销活动成员 / 时长记录
 ├── bv_batch_from_xls.py# Excel 批量时数录入（按姓名搜索）
 ├── bv_hours_for_roster.py # 已招募成员批量时数（直接拉名单）
-├── bv_list_projects.py # 从组织账号拉取活动id
-├── names.example.txt   # 姓名名单示例
-├── api.md              # 接口抓包/逆向记录模板
 ├── requirements.txt
 └── .gitignore
 ```
 
-## 新版图形界面
+---
 
-推荐使用gui版本进行操作：
+## 获取组织 ID
+
+如果已有 accessToken，但不知道 `ORG_ID`，可以先用 `bv_current_org.py` 查询当前账号可管理的组织：
 
 ```bash
-start_gui.bat
+python3 bv_current_org.py
+
+# 或临时传入 token
+python3 bv_current_org.py --token "<accessToken>"
+
+# 输出完整 JSON
+python3 bv_current_org.py --json
 ```
 
-入口位于，主体代码拆分在 `bv2008_gui/` 目录中：
+输出示例：
+
+```text
+user: *钦唐 uid=185037406
+defaultOrgId: 223718004
+
+org_id           parent_org_id    roles    org_name
+223718004        3471936          1        中国人民大学商学院青协志愿者服务队
+```
+
+其中 `defaultOrgId` 和列表里的 `org_id` 都可以作为 `config.py` 里的 `ORG_ID`。
+
+相关接口：
+
+| interface_id | app_id | biz_content | 说明 |
+|---|---|---|---|
+| `zybjfrontcurrUserInfo` | zybjuser | `{}` | 获取当前用户信息、默认组织 ID、可管理组织列表 |
+
+## 获取项目 ID
+
+如果只知道组织 ID（`org_id` / `ORG_ID`），可以先用 `bv_list_projects.py` 拉取该组织下的项目列表：
+
+```bash
+python3 bv_list_projects.py
+
+# 或临时指定组织 ID / token
+python3 bv_list_projects.py --org-id 223718004 --token "<accessToken>"
+
+# 输出 JSON，便于脚本继续处理
+python3 bv_list_projects.py --org-id 223718004 --json
+```
+
+输出中的 `project_id` 对应接口返回字段 `iid`。
+
+- `level=1`：一级项目
+- `level=2`：二级项目，通常用于活动列表接口的 `projectId`
+
+例如：
+
+```text
+level project_id                         parent_id                          date                    name
+1     a45189b07db34dc28a55ba3ef5fd66aa   0                                  2026-06-01..2027-06-01  运动会志愿保障项目
+2     23390729e65d4748b2954c7207b6aa7a   a45189b07db34dc28a55ba3ef5fd66aa   2026-06-01..2026-07-31    2026商学院春季运动会志愿保障
+```
+
+此时 `23390729e65d4748b2954c7207b6aa7a` 就是后续查询活动列表时使用的二级 `projectId`。
+
+### 相关接口
+
+| interface_id | app_id | biz_content | 说明 |
+|---|---|---|---|
+| `queryProjectList` | zybjfront | `{orgId}` | 获取组织下一级项目列表 |
+| `queryProjectList` | zybjfront | `{orgId,parentId}` | 获取某个一级项目下的二级项目列表 |
+
+`queryProjectList` 返回的项目 ID 字段名是 `iid`；脚本为了更直观，将它规范化输出为 `projectId`。
+> 本工具由中国人民大学商学院青年志愿者协会开发，用于协会内部志愿服务项目管理与批量录入辅助。
+## 新版图形界面（推荐）
+
+推荐使用新的净室重构版本：
+
+```bash
+python3 bv_gui.py
+```
+
+新版入口位于 `bv_gui.py`，主体代码拆分在 `bv2008_gui/` 目录中：
 
 - `api.py`：封装登录、组织、项目、活动、岗位、名单、录入接口
 - `config_store.py`：本地配置读写
 - `excel.py`：Excel 表头识别与推荐报表格式
 - `widgets.py`：通用 Tkinter 控件
-- `app.py`：登录、配置、名单、导入页面
+- `app.py`：登录、配置、名单、导入、撤销操作页面
+
+### Windows EXE / Agent CLI 双入口
+
+同一个 `bv2008_gui.exe` 无参数启动窗口；增加 `cli` 后执行无交互命令，并只向标准输出写 JSON，适合 Agent 或脚本调用。源码运行时把 `bv2008_gui.exe` 换成 `python bv_gui.py` 即可。
+
+```powershell
+# 查看完整命令树；全局 --token 必须放在 cli 后、业务命令前
+bv2008_gui.exe cli --help
+
+# 扫码登录：先创建，再轮询并把成功 token 保存到 GUI 共用配置
+bv2008_gui.exe cli login qr
+bv2008_gui.exe cli login wait CODE_ID --save
+
+# 查看/设置 GUI 共用配置（show 默认把 token 脱敏）
+bv2008_gui.exe cli config show
+bv2008_gui.exe cli config set --org-id ORG_ID --activity-id ACTIVITY_ID --post-id POST_ID
+
+# 查询组织、项目、活动、岗位与名单
+bv2008_gui.exe cli list orgs
+bv2008_gui.exe cli list projects --org-id ORG_ID
+bv2008_gui.exe cli list activities --project-id PROJECT_ID
+bv2008_gui.exe cli list posts --activity-id ACTIVITY_ID
+bv2008_gui.exe cli list roster
+
+# Excel 全流程；正式写入必须显式 --confirm
+bv2008_gui.exe cli import roster.xlsx --start 2026-09-01 --dry-run
+bv2008_gui.exe cli import roster.xlsx --start 2026-09-01 --confirm
+
+# 永久删除同样必须显式 --confirm
+bv2008_gui.exe cli undo member MEMBER_RELATION_IID --confirm
+bv2008_gui.exe cli undo timing TIMING_IID --activity-id ACTIVITY_ID --confirm
+```
+
+Token 也可通过 `BV2008_TOKEN` 环境变量临时提供，优先级为：全局 `--token`、环境变量、GUI 已保存登录态。CLI 退出码：`0` 成功、`1` 参数或普通错误、`2` 部分失败/等待超时、`3` 登录态错误。
+
+Windows 打包脚本为 `build_windows.ps1`。它使用 Nuitka 的 `--windows-console-mode=hide`：从资源管理器打开时新控制台保持隐藏，从 PowerShell/CMD/Agent 启动时则复用调用方控制台、等待命令完成并返回退出码。
+
+旧版 `bv_tui_windows.py` 保留作为回退，不再建议继续在旧文件上做大改。
