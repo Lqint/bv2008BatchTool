@@ -213,8 +213,31 @@ def search_org_user(token: str, name: str, pk: str, activity_id: str, post_id: s
         "postId": post_id,
         "orgId": org_id,
     }
-    data = unwrap(call("activityUser-findOrgUserList", biz, access_token=token))
-    return data["resultData"].get("dataList") or []
+    users: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    while True:
+        data = unwrap(call("activityUser-findOrgUserList", biz, access_token=token))
+        result = data["resultData"]
+        batch = result.get("dataList") or []
+        total = result.get("totalCount")
+        if not batch:
+            if total is not None and len(users) < int(total):
+                raise RuntimeError("组织搜索结果不完整，无法列出全部候选，请稍后重试")
+            break
+        previous = len(seen)
+        for user in batch:
+            uid = str(user.get("uid") or "").strip()
+            if uid and uid not in seen:
+                users.append(user)
+                seen.add(uid)
+        if total is not None and len(users) >= int(total):
+            break
+        if total is None and len(batch) < biz["pageSize"]:
+            break
+        if len(seen) == previous:
+            raise RuntimeError("组织搜索分页未取得新账号，无法完整列出候选，请稍后重试")
+        biz["pageNo"] += 1
+    return users
 
 
 def add_org_member(token: str, name: str, cert_no: str, pk: str) -> tuple[bool, str]:

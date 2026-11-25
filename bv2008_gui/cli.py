@@ -12,7 +12,8 @@ from typing import Any
 from bv_client import call, unwrap
 
 from . import api
-from .app import allocate, is_auth_error, match_roster_user, parse_record_iids, upload_proof
+from .app import allocate, is_auth_error, parse_record_iids, upload_proof
+from .matching import candidate_summary, collect_candidates
 from .config_store import load_config, save_config
 from .excel import ImportRow, read_excel
 
@@ -106,26 +107,29 @@ def _run_import(args: argparse.Namespace, cfg: dict[str, str]) -> tuple[dict[str
         result = results[index]
         try:
             users = api.search_org_user(token, row.name, pk, activity_id, post_id, org_id)
-            if not users and row.cert_no:
+            candidates = collect_candidates(row, users, roster)
+            if not candidates and row.cert_no:
                 ok, message = api.add_org_member(token, row.name, row.cert_no, pk)
                 if not ok:
                     result["error"] = f"addMember: {message}"
                 else:
                     users = api.search_org_user(token, row.name, pk, activity_id, post_id, org_id)
-            if users:
-                uid_by_index[index] = str(users[0]["uid"])
-                result["uid"] = uid_by_index[index]
-            elif roster:
-                roster_user, reason = match_roster_user(row, roster)
-                if roster_user:
-                    uid_by_index[index] = str(roster_user["uid"])
-                    already_member.add(index)
-                    result["uid"] = uid_by_index[index]
-                    result["member"] = "already"
-                else:
-                    result["error"] = reason
-            else:
+                    candidates = collect_candidates(row, users, roster)
+            if not candidates:
                 result["error"] = "未找到组织成员"
+                continue
+            if len(candidates) > 1:
+                result["candidates"] = [candidate_summary(user) for user in candidates]
+                result["member"] = "ambiguous"
+                result["timing"] = "skipped"
+                result["error"] = "多名候选，请在 GUI 中核对账号 ID 并手动选择；此行已跳过"
+                continue
+            user = candidates[0]
+            uid_by_index[index] = user["uid"]
+            result["uid"] = user["uid"]
+            if user["_in_roster"]:
+                already_member.add(index)
+                result["member"] = "already"
         except Exception as exc:
             if is_auth_error(exc):
                 raise

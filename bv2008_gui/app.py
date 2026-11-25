@@ -26,11 +26,13 @@ try:
     from . import api
     from .config_store import load_config, save_config
     from .excel import ImportRow, read_excel, recommended_template_text
+    from .matching import collect_candidates, match_roster_user, roster_name_masks
     from .widgets import ScrolledText, StatusBar, TreeFrame
 except ImportError:
     import api  # type: ignore[no-redef]
     from config_store import load_config, save_config  # type: ignore[no-redef]
     from excel import ImportRow, read_excel, recommended_template_text  # type: ignore[no-redef]
+    from bv2008_gui.matching import collect_candidates, match_roster_user, roster_name_masks
     from widgets import ScrolledText, StatusBar, TreeFrame  # type: ignore[no-redef]
 
 
@@ -144,26 +146,6 @@ def upload_proof(token: str, path: Path | None = None) -> str:
     biz = {"file": {"uid": f"vc-upload-{int(time.time() * 1000)}-1"}, "uploadType": "durationFile"}
     resp = call("zybj_uploadFile", biz, access_token=token, app_id="zybjuser", file=(name, data, mime))
     return unwrap(resp)["resultData"]["fileData"]["newName"]
-
-
-def roster_name_masks(name: str) -> set[str]:
-    clean = "".join(str(name).split())
-    if not clean:
-        return set()
-    masks = {"*" + clean[1:]}
-    if len(clean) > 2:
-        masks.add("*" + clean[-2:])
-    return masks
-
-
-def match_roster_user(row: ImportRow, roster: list[dict[str, Any]]) -> tuple[dict[str, Any] | None, str]:
-    masks = roster_name_masks(row.name)
-    matches = [user for user in roster if str(user.get("nameSensitive") or "") in masks and user.get("uid")]
-    if len(matches) == 1:
-        return matches[0], "matched"
-    if len(matches) > 1:
-        return None, f"multiple roster matches: {len(matches)}"
-    return None, "not found in roster"
 
 
 def parse_record_iids(value: str) -> list[str]:
@@ -892,11 +874,67 @@ class UndoPanel(BasePanel):
             self.ui(lambda message=message: messagebox.showerror("删除失败", message))
 
 
+class CandidateDialog(tk.Toplevel):
+    """Choose one account explicitly; closing or Escape skips this person."""
+
+    def __init__(self, parent: tk.Misc, name: str, candidates: list[dict[str, Any]]) -> None:
+        super().__init__(parent)
+        self.result: dict[str, Any] | None = None
+        self.candidates = candidates
+        self.title("多名候选：请选择账号")
+        self.transient(parent.winfo_toplevel())
+        setup_dialog_window(self, parent, 860, 400, 650, 320)
+        body = ttk.Frame(self, padding=16)
+        body.pack(fill="both", expand=True)
+        ttk.Label(body, text=f"“{name}”找到 {len(candidates)} 个候选账号，请核对账号 ID 后选择。",
+                  wraplength=760).pack(anchor="w")
+        ttk.Label(body, text="无法确认时请选择“跳过此人”，该行不会入岗或录入时长。",
+                  wraplength=760).pack(anchor="w", pady=(4, 12))
+        self.table = TreeFrame(body, ("脱敏姓名", "账号 ID（uid）", "志愿者编号", "岗位状态"), height=6)
+        self.table.pack(fill="both", expand=True)
+        self.table.tree.configure(selectmode="browse")
+        self.table.tree.column("账号 ID（uid）", width=310, minwidth=280)
+        for index, user in enumerate(candidates):
+            self.table.add_row((user.get("nameSensitive") or "", str(user["uid"]),
+                                user.get("userNumber") or "", "已在岗" if user.get("_in_roster") else "待入岗"), str(index))
+        self.uid_var = tk.StringVar()
+        selected = ttk.Frame(body)
+        selected.pack(fill="x", pady=10)
+        ttk.Label(selected, text="选中账号 ID：").pack(side="left")
+        ttk.Entry(selected, textvariable=self.uid_var, state="readonly").pack(side="left", fill="x", expand=True)
+        actions = ttk.Frame(body)
+        actions.pack(fill="x")
+        self.confirm_button = ttk.Button(actions, text="确认使用此账号", command=self.confirm, state="disabled")
+        self.confirm_button.pack(side="right")
+        self.skip_button = ttk.Button(actions, text="跳过此人", command=self.destroy)
+        self.skip_button.pack(side="right", padx=10)
+        self.table.tree.bind("<<TreeviewSelect>>", self.selection_changed)
+        self.bind("<Escape>", lambda event: self.destroy())
+        self.protocol("WM_DELETE_WINDOW", self.destroy)
+        self.grab_set()
+        self.table.tree.focus_set()
+
+    def selection_changed(self, event: Any = None) -> None:
+        selection = self.table.tree.selection()
+        self.uid_var.set(str(self.candidates[int(selection[0])]["uid"]) if selection else "")
+        self.confirm_button.configure(state="normal" if selection else "disabled")
+
+    def confirm(self) -> None:
+        selection = self.table.tree.selection()
+        if len(selection) != 1:
+            return
+        self.result = self.candidates[int(selection[0])]
+        self.destroy()
+
+
 class ImportPanel(BasePanel):
     COLUMNS = ("姓名", "时数", "证件号", "组织搜索", "入岗", "时数录入", "状态")
 
     def __init__(self, master: tk.Misc, app: "BVGuiApp") -> None:
         super().__init__(master, app)
+        self.pipeline_running = False
+        self.pipeline_cancelled = threading.Event()
+        app.bind("<Destroy>", lambda event: self.pipeline_cancelled.set() if event.widget is app else None, add="+")
         self.page_header("Excel 批量导入", "加载表格后先预览分配计划，再执行入岗和时数录入。")
         self.path_var = tk.StringVar()
         file_box = self.section("1. 选择文件", "支持 .xls 和 .xlsx；表头至少包含姓名和时数。")
@@ -993,6 +1031,9 @@ class ImportPanel(BasePanel):
         self.app.complete_tutorial_step("import")
 
     def run_pipeline(self) -> None:
+        if self.pipeline_running:
+            messagebox.showinfo("处理中", "当前导入尚未完成，请先处理候选账号提示或等待本次导入结束。")
+            return
         cfg = self.app.cfg
         if not self.app.import_rows:
             messagebox.showwarning("提示", "请先加载 Excel")
@@ -1008,13 +1049,48 @@ class ImportPanel(BasePanel):
         if not messagebox.askyesno("确认", f"将对 {len(self.app.import_rows)} 行执行全流程，是否继续？"):
             return
         self.notify("全流程执行中", "busy")
-        self.app.run_bg(lambda: self._pipeline(self.app.import_rows, start, max_hours))
+        self.pipeline_running = True
+        rows = list(self.app.import_rows)
+
+        def run() -> None:
+            try:
+                self._pipeline(rows, start, max_hours)
+            finally:
+                self.ui(lambda: setattr(self, "pipeline_running", False))
+
+        self.app.run_bg(run)
+
+    def choose_candidate(self, name: str, candidates: list[dict[str, Any]]) -> dict[str, Any] | None:
+        # The pipeline runs on a worker; create and handle all Tk widgets on the UI thread.
+        done = threading.Event()
+        selected: list[dict[str, Any] | None] = [None]
+        errors: list[Exception] = []
+
+        def show() -> None:
+            try:
+                if self.pipeline_cancelled.is_set():
+                    return
+                dialog = CandidateDialog(self.app, name, candidates)
+                self.app.wait_window(dialog)
+                selected[0] = dialog.result
+            except Exception as exc:
+                errors.append(exc)
+            finally:
+                done.set()
+
+        self.app.ui(show)
+        while not done.wait(0.1):
+            if self.pipeline_cancelled.is_set():
+                return None
+        if errors:
+            raise errors[0]
+        return selected[0]
 
     def set_cell(self, row: int, column: str, value: str) -> None:
         self.table.update_cell(str(row), column, value)
 
     def _pipeline(self, rows: list[ImportRow], start: date, max_hours: float) -> None:
-        cfg = self.app.cfg
+        cfg = dict(self.app.cfg)
         token = cfg["token"]
 
         def log(message: str) -> None:
@@ -1050,41 +1126,57 @@ class ImportPanel(BasePanel):
         uid_by_index: dict[int, str] = {}
         roster_uid_indexes: set[int] = set()
         for i, row in enumerate(rows):
+            if self.pipeline_cancelled.is_set():
+                return
             set_cell(i, "组织搜索", "搜索中")
             try:
                 users = api.search_org_user(token, row.name, pk, cfg["activity_id"], cfg["post_id"], cfg["org_id"])
-                if not users and row.cert_no:
+                candidates = collect_candidates(row, users, roster)
+                if not candidates and row.cert_no:
                     set_cell(i, "组织搜索", "尝试加入组织")
                     ok, message = api.add_org_member(token, row.name, row.cert_no, pk)
                     log(f"{row.name} addMember：{message}")
                     if ok:
                         users = api.search_org_user(token, row.name, pk, cfg["activity_id"], cfg["post_id"], cfg["org_id"])
-                if users:
-                    uid_by_index[i] = str(users[0]["uid"])
-                    set_cell(i, "组织搜索", "完成")
-                    set_cell(i, "状态", f"uid={users[0]['uid']}")
-                elif roster:
-                    roster_user, reason = match_roster_user(row, roster)
-                    if roster_user:
-                        uid_by_index[i] = str(roster_user["uid"])
-                        roster_uid_indexes.add(i)
-                        set_cell(i, "组织搜索", "岗位名单")
-                        set_cell(i, "状态", f"uid={roster_user['uid']} (岗位名单)")
-                    else:
-                        set_cell(i, "组织搜索", "未找到")
-                        set_cell(i, "状态", f"未找到，跳过 ({reason})")
-                else:
+                        candidates = collect_candidates(row, users, roster)
+                if not candidates:
                     set_cell(i, "组织搜索", "未找到")
                     set_cell(i, "状态", "未找到，跳过")
+                    continue
+                manual = len(candidates) > 1
+                if manual:
+                    ids = ", ".join(user["uid"] for user in candidates)
+                    set_cell(i, "组织搜索", f"多名候选（{len(candidates)}）")
+                    set_cell(i, "状态", f"等待选择账号：{ids}")
+                    log(f"{row.name} 多名候选 uid：{ids}")
+                    user = self.choose_candidate(row.name, candidates)
+                    if user is None:
+                        set_cell(i, "状态", f"已跳过，未选择账号；候选 uid：{ids}")
+                        set_cell(i, "入岗", "跳过")
+                        set_cell(i, "时数录入", "跳过")
+                        log(f"{row.name} 未选择账号，跳过")
+                        continue
+                else:
+                    user = candidates[0]
+                uid_by_index[i] = str(user["uid"])
+                if user["_in_roster"]:
+                    roster_uid_indexes.add(i)
+                set_cell(i, "组织搜索", "手动选择" if manual else ("岗位名单" if user["_in_roster"] else "完成"))
+                set_cell(i, "状态", f"uid={user['uid']}" + (" (手动选择)" if manual else ""))
+                if manual:
+                    log(f"{row.name} 手动选择 uid={user['uid']}")
             except Exception as exc:
                 if abort_for_auth(exc):
                     return
                 set_cell(i, "组织搜索", "失败")
                 set_cell(i, "状态", str(exc))
 
+        if self.pipeline_cancelled.is_set():
+            return
         valid = sorted(uid_by_index)
         if not valid:
             log("没有可处理人员")
+            self.ui(lambda: self.notify("没有可处理人员，请查看未找到或已跳过的行", "warning"))
             return
 
         for i in sorted(roster_uid_indexes):
@@ -1109,7 +1201,10 @@ class ImportPanel(BasePanel):
         elif roster_uid_indexes:
             log(f"岗位名单已在岗：{len(roster_uid_indexes)} 人")
 
+        succeeded = 0
         for i in valid:
+            if self.pipeline_cancelled.is_set():
+                return
             row = rows[i]
             set_cell(i, "时数录入", "录入中")
             try:
@@ -1126,14 +1221,16 @@ class ImportPanel(BasePanel):
                 }
                 unwrap(call("activityTiming-batchAdd", biz, access_token=token))
                 set_cell(i, "时数录入", "完成")
-                set_cell(i, "状态", "完成")
+                set_cell(i, "状态", f"完成 uid={uid_by_index[i]}")
+                succeeded += 1
                 log(f"{row.name} {row.hours:g}h 录入完成")
             except Exception as exc:
                 if abort_for_auth(exc):
                     return
                 set_cell(i, "时数录入", "失败")
                 set_cell(i, "状态", str(exc))
-        self.ui(lambda: self.notify("全流程完成", "success"))
+        self.ui(lambda: self.notify(f"处理完成：成功 {succeeded} 行，跳过或失败 {len(rows) - succeeded} 行",
+                                   "success" if succeeded == len(rows) else "warning"))
         self.ui(lambda: self.app.complete_tutorial_step("import"))
 
 
